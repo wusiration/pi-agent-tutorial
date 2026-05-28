@@ -24,79 +24,78 @@ pi-agent-tutorial/
 │   ├── .vitepress/
 │   │   └── config.mts             # VitePress 站点配置
 │   ├── guide/                     # 📚 原理篇（11 章）
-│   │   ├── 01-why-agent.md        # 为什么需要 Agent？
-│   │   ├── 02-intro-pi.md         # 认识 Pi Agent
-│   │   ├── 03-core-concepts.md    # 核心概念速览
-│   │   ├── 04-message-flow.md     # 消息流与状态机
-│   │   ├── 05-agent-loop.md       # Agent Loop
-│   │   ├── 06-event-architecture.md   # 事件驱动架构
-│   │   ├── 07-tool-system.md      # 工具系统与并行执行
-│   │   ├── 08-session-compaction.md   # 会话树与上下文压缩
-│   │   ├── 09-pi-ai-layer.md      # LLM 抽象层 pi-ai
-│   │   ├── 10-code-map.md         # 代码目录与模块关系
-│   │   └── 11-types-interfaces.md # 关键类型与接口
 │   ├── demos/                     # 🛠️ Demo 篇（5 个）
-│   │   ├── 01-hello-stream.md     # 流式 LLM 输出
-│   │   ├── 02-manual-loop.md      # 手动 Agent Loop
-│   │   ├── 03-tool-calls.md       # 工具调用与执行
-│   │   ├── 04-event-ui.md         # 事件订阅与 UI
-│   │   └── 05-steering-queue.md   # Steering 与队列
 │   ├── project/                   # 🚀 项目篇（8 章）
-│   │   ├── 01-overview.md         # 项目概述
-│   │   ├── 02-tech-stack.md       # 技术选型与目录结构
-│   │   ├── 03-backend-core.md     # 后端：Agent Core
-│   │   ├── 04-backend-api.md      # 后端：HTTP API 与 SSE
-│   │   ├── 05-frontend-chat.md    # 前端：React 聊天界面
-│   │   ├── 06-frontend-tools.md   # 前端：工具执行可视化
-│   │   ├── 07-integration.md      # 联调与运行
-│   │   └── 08-extensions.md       # 扩展方向
-│   ├── public/
-│   │   └── logo.svg               # 站点 Logo
-│   └── index.md                   # 首页
+│   └── public/
+│       └── logo.svg               # 站点 Logo
 │
-├── package.json                   # 项目依赖与脚本
+├── examples/                      # 最小可运行示例（独立目录，直接运行）
+│   └── 01-manual-loop/            # 最小 Agent Loop（无框架依赖）
+│       ├── index.ts
+│       └── package.json
+│
+├── playground/                    # 完整全栈项目（前后端分离）
+│   ├── backend/                   # Node.js + Fastify + SSE
+│   │   ├── src/
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   ├── frontend/                  # React + Tailwind + Vite
+│   │   ├── src/
+│   │   ├── package.json
+│   │   └── vite.config.ts
+│   └── shared/                    # 前后端共享类型
+│       └── types.ts
+│
+├── package.json                   # 文档站点依赖
 ├── README.md                      # 本文件
 ├── CONTRIBUTING.md                # 贡献指南
 ├── CHANGELOG.md                   # 版本记录
 └── DEPLOY.md                      # 部署文档
 ```
 
+**三个层次的关系**：
+
+| 层次 | 内容 | 用途 |
+|------|------|------|
+| `docs/` | VitePress 教程站点 | 阅读学习，理解原理 |
+| `examples/` | 最小可运行代码 | 快速验证一个机制，无框架依赖 |
+| `playground/` | 完整全栈项目 | 端到端运行，理解工程实践 |
+
 ---
 
 ## 🚀 快速开始
 
-### 环境要求
-
-- Node.js >= 18
-- npm >= 9
-
-### 安装与启动
+### 1. 阅读教程（docs/）
 
 ```bash
-# 1. 进入项目目录
-cd pi-agent-tutorial
-
-# 2. 安装依赖
 npm install
-
-# 3. 启动开发服务器
 npm run docs:dev
-
-# 4. 浏览器打开 http://localhost:5173
+# 打开 http://localhost:5173
 ```
 
-### 构建静态站点
+### 2. 运行最小示例（examples/）
 
 ```bash
-npm run docs:build
+cd examples/01-manual-loop
+npm install
+npm run start
+# 无需 API key，使用 Mock LLM
 ```
 
-构建产物位于 `docs/.vitepress/dist/`，可直接部署到任何静态托管服务。
-
-### 预览构建产物
+### 3. 运行完整项目（playground/）
 
 ```bash
-npm run docs:preview
+# 终端 1：启动后端
+cd playground/backend
+npm install
+npm run dev
+
+# 终端 2：启动前端
+cd playground/frontend
+npm install
+npm run dev
+
+# 打开 http://localhost:5173
 ```
 
 ---
@@ -105,59 +104,25 @@ npm run docs:preview
 
 ### 学习路径建议
 
-```mermaid
-graph LR
-    A[原理篇 01-03] --> B[原理篇 04-09]
-    B --> C[Demo 1-2]
-    C --> D[Demo 3-5]
-    D --> E[项目篇 01-04]
-    E --> F[项目篇 05-08]
+```
+第一步：读 docs/guide/01-03（理解 Agent 是什么）
+    ↓
+第二步：跑 examples/01-manual-loop（感受最小 Agent）
+    ↓
+第三步：读 docs/guide/04-09（深入核心机制）
+    ↓
+第四步：跑 docs/demos/ 的 5 个 Demo（逐个验证）
+    ↓
+第五步：读 docs/project/ 并跑 playground/（完整项目）
 ```
 
-| 阶段 | 内容 | 预计时间 | 目标 |
-|------|------|---------|------|
-| **第一阶段** | 原理篇 01-03 | 1-2 小时 | 建立 Agent 认知框架 |
-| **第二阶段** | 原理篇 04-09 | 3-4 小时 | 深入理解核心机制 |
-| **第三阶段** | Demo 1-5 | 2-3 小时 | 动手验证关键概念 |
-| **第四阶段** | 项目篇 01-08 | 4-6 小时 | 实现完整全栈应用 |
+### 内容分布
 
-### 每章学习目标
-
-**原理篇**
-
-| 章节 | 学习目标 |
-|------|---------|
-| 01 | 理解 Agent 与"直接调 LLM API"的本质区别 |
-| 02 | 了解 Pi 的设计哲学、四大模式、三大核心特性 |
-| 03 | 掌握 AgentMessage、Loop、Event、Tool、Session 等核心术语 |
-| 04 | 理解消息从诞生到被 LLM 消费的完整生命周期 |
-| 05 | 掌握 Agent Loop 的内部结构和关键决策点 |
-| 06 | 理解事件驱动架构的设计意图和实现方式 |
-| 07 | 掌握工具系统的 Schema、校验、并行执行和错误处理 |
-| 08 | 理解树形会话结构和上下文压缩机制 |
-| 09 | 了解 pi-ai 如何用四种协议覆盖三十多家提供商 |
-| 10 | 熟悉 Pi 的 monorepo 结构和教学版的取舍策略 |
-| 11 | 掌握核心类型体系和 TypeScript 设计模式 |
-
-**Demo 篇**
-
-| Demo | 掌握能力 | 是否需要 API Key |
-|------|---------|-----------------|
-| 01 | 流式 LLM 输出 | ✅ 需要（或 Mock） |
-| 02 | 状态管理、工具调用、自动循环 | ✅ 需要（或 Mock） |
-| 03 | 多工具、并行执行、错误自纠正 | ✅ 需要（或 Mock） |
-| 04 | 事件驱动、终端聊天 UI | ✅ 需要（或 Mock） |
-| 05 | 运行时插入指令、人机协作 | ✅ 需要（或 Mock） |
-
-**项目篇**
-
-| 章节 | 交付物 |
-|------|--------|
-| 01-02 | 初始化好的前后端项目结构 |
-| 03-04 | 可运行的后端服务（Agent Core + HTTP API + SSE） |
-| 05-06 | 可交互的前端界面（聊天 + 工具可视化 + 会话管理） |
-| 07 | 前后端联调通过，可完整运行 |
-| 08 | 清晰的扩展路线图 |
+| 篇章 | 章节数 | 核心内容 |
+|------|--------|---------|
+| **原理篇** `docs/guide/` | 11 章 | 从"为什么需要 Agent"到 LLM 抽象层 |
+| **Demo 篇** `docs/demos/` | 5 个 | 流式输出 → 手动 Loop → 工具 → UI → Steering |
+| **项目篇** `docs/project/` | 8 章 | 全栈实现：后端 Core → API → 前端聊天 → 联调 |
 
 ---
 
@@ -174,6 +139,8 @@ graph LR
 | 教学项目后端 | Node.js | >=18 | 运行时 |
 | 教学项目后端 | Fastify | ^4 | Web 框架 |
 | 教学项目后端 | SSE | - | 服务器推送 |
+| 参数校验 | TypeBox | ^0.32 | JSON Schema + TS 类型 |
+| 测试 | Vitest | ^1.6 | 单元测试 |
 
 ---
 
