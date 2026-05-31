@@ -103,6 +103,24 @@ export default withMermaid(defineConfig({
   },
 
   mermaid: {
-    // Mermaid 配置选项
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#e1f5fe',
+      primaryTextColor: '#01579b',
+      primaryBorderColor: '#0288d1',
+      lineColor: '#0288d1',
+      secondaryColor: '#fff3e0',
+      tertiaryColor: '#e8f5e9',
+      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontSize: '14px',
+    },
+    flowchart: {
+      curve: 'basis',
+      padding: 16,
+    },
+    sequence: {
+      mirrorActors: false,
+      bottomMarginAdj: 10,
+    },
   },
 }))
