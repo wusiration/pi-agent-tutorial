@@ -58,6 +58,7 @@ export class Agent {
     // 如果外部传入 signal，使用外部传入的；否则自己创建
     const externalSignal = options?.signal
     const internalController = externalSignal ? null : new AbortController()
+    this.abortController = internalController
     const signal = externalSignal || internalController!.signal
 
     const userMsg: Message =
@@ -75,10 +76,7 @@ export class Agent {
       )
     } finally {
       this._isStreaming = false
-      // 只有内部创建的 controller 才需要清理
-      if (internalController) {
-        // 不需要额外操作
-      }
+      this.abortController = null
     }
   }
 
@@ -91,6 +89,7 @@ export class Agent {
   }
 
   reset() {
+    this.abortController?.abort()
     this.context.messages = []
     this._isStreaming = false
     this.abortController = null

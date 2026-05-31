@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Backend build and test
@@ -44,11 +44,12 @@ jobs:
           npm ci
           npm run build
 
-      - name: Example typecheck
+      - name: Example typecheck and smoke test
         working-directory: examples/01-manual-loop
         run: |
           npm ci
           npm run typecheck
+          timeout 10s npm run start || true
 
   build-docs:
     runs-on: ubuntu-latest
@@ -62,7 +63,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies

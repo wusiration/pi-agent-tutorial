@@ -76,11 +76,24 @@ interface AgentContext {
 async function mockLLM(
   context: AgentContext
 ): Promise<AssistantMessage> {
-  const lastUser = context.messages.findLast((m) => m.role === 'user')
-  const text = typeof lastUser?.content === 'string' ? lastUser.content : ''
+  const lastMessage = context.messages.at(-1)
 
   // 模拟延迟
   await delay(300)
+
+  // 如果上一条是 toolResult，说明工具已执行完毕，给出最终回答
+  if (lastMessage?.role === 'toolResult') {
+    const toolResult = lastMessage as ToolResultMessage
+    return {
+      role: 'assistant',
+      content: [{ type: 'text', text: `根据查询结果：${toolResult.content[0].text}` }],
+      stopReason: 'stop',
+      timestamp: Date.now(),
+    }
+  }
+
+  const lastUser = context.messages.findLast((m) => m.role === 'user')
+  const text = typeof lastUser?.content === 'string' ? lastUser.content : ''
 
   // 简单规则：如果提到"天气"就调用天气工具
   if (text.includes('天气')) {

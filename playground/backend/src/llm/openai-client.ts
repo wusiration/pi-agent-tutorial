@@ -2,6 +2,7 @@ import type { Message, AgentEvent, ToolDefinition, AssistantMessage } from '../.
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 interface OpenAIStreamOptions {
   onEvent: (event: AgentEvent) => void
@@ -26,7 +27,7 @@ export async function openaiStream(
       Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: OPENAI_MODEL,
       messages: convertMessages(messages),
       tools: tools.length > 0 ? tools.map(convertTool) : undefined,
       tool_choice: tools.length > 0 ? 'auto' : undefined,
@@ -127,7 +128,7 @@ export async function openaiStream(
         if (finishReason === 'tool_calls' || (finishReason === 'stop' && isCollectingToolCall)) {
           // 流结束，统一解析所有 tool call 参数
           const toolCallContent = Array.from(pendingToolCalls.entries()).map(([index, tc]) => {
-            let parsedArgs: Record<string, any> = {}
+            let parsedArgs: Record<string, any>
             try {
               parsedArgs = JSON.parse(tc.argumentsText || '{}')
             } catch (parseErr: any) {
@@ -139,8 +140,14 @@ export async function openaiStream(
                 })
                 parseErrorLogged = true
               }
-              // 回传解析错误，让调用方知道
-              parsedArgs = { __parseError: true, __raw: tc.argumentsText, __error: parseErr.message }
+              // 解析失败时，生成一个错误结果，不进入工具执行
+              return {
+                type: 'toolCall' as const,
+                id: tc.id || `call-${index}-${Date.now()}`,
+                name: tc.name,
+                arguments: { __parseError: true, __raw: tc.argumentsText, __error: parseErr.message },
+                isError: true as const,
+              }
             }
 
             return {

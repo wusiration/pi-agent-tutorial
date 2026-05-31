@@ -113,7 +113,7 @@ npm run dev
     ↓
 第三步：读 docs/guide/04-09（深入核心机制）
     ↓
-第四步：跑 docs/demos/ 的 5 个 Demo（逐个验证）
+第四步：读 docs/demos/ 的 5 个 Demo 讲解（理解设计思路）
     ↓
 第五步：读 docs/project/ 并跑 playground/（完整项目）
 ```

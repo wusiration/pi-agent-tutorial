@@ -59,6 +59,7 @@ export function useAgent() {
     let currentSessionId = sessionId
     if (!currentSessionId) {
       const res = await fetch('/api/sessions', { method: 'POST' })
+      await ensureOk(res)
       const data = await res.json()
       currentSessionId = data.sessionId
       setSessionId(currentSessionId)
@@ -93,7 +94,29 @@ export function useAgent() {
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          // flush decoder
+          const remaining = decoder.decode()
+          if (remaining) {
+            buffer += remaining
+          }
+          // 处理最后一行
+          if (buffer) {
+            const lines = buffer.split('\n')
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              const data = line.slice(6)
+              if (!data) continue
+              try {
+                const event: AgentEvent = JSON.parse(data)
+                handleEvent(event)
+              } catch {
+                // ignore parse error for individual events
+              }
+            }
+          }
+          break
+        }
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
@@ -224,11 +247,12 @@ export function useAgent() {
 
   const reset = useCallback(async () => {
     if (!sessionId) return
-    await fetch('/api/reset', {
+    const res = await fetch('/api/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId }),
     })
+    await ensureOk(res)
     setMessages([])
     setError(null)
     assistantMessageIds.current.clear()
@@ -241,6 +265,7 @@ export function useAgent() {
   const exportSession = useCallback(async () => {
     if (!sessionId) return
     const res = await fetch(`/api/export?sessionId=${sessionId}`)
+    await ensureOk(res)
     const data = await res.json()
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)

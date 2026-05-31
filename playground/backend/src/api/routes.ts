@@ -93,6 +93,13 @@ export async function registerRoutes(app: FastifyInstance) {
       reply.status(404)
       return { error: 'Session not found', code: 'SESSION_NOT_FOUND' }
     }
+
+    // 并发检查：如果 Agent 正在处理请求，返回 409
+    if (agent.state.isStreaming) {
+      reply.status(409)
+      return { error: 'Agent is already streaming', code: 'CONFLICT' }
+    }
+
     const sse = new SSEConnection(reply)
     let unsubscribe: (() => void) | null = null
 
@@ -105,7 +112,6 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!sse.isClosed()) {
         controller.abort()
         sse.close()
-        unsubscribe?.()
       }
     })
 
@@ -114,7 +120,6 @@ export async function registerRoutes(app: FastifyInstance) {
       sse.send(event)
       if (event.type === 'agent_end') {
         sse.close()
-        unsubscribe?.()
       }
     })
 
@@ -132,6 +137,8 @@ export async function registerRoutes(app: FastifyInstance) {
         })
       }
       sse.close()
+    } finally {
+      unsubscribe?.()
     }
 
     return reply

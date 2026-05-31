@@ -20,6 +20,7 @@ export interface ToolCallContent {
   id: string
   name: string
   arguments: Record<string, any>
+  isError?: boolean
 }
 
 export type Content = TextContent | ImageContent | ToolCallContent

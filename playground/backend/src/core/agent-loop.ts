@@ -12,17 +12,22 @@ function isAssistantMessage(msg: Message): msg is AssistantMessage {
 }
 
 // 按完整 turn 裁剪消息，避免孤立 toolResult
+// 一个完整 turn = assistant + 0..n toolResult（如果有 toolCall）
 function trimMessagesByTurns(messages: Message[], maxMessages: number): Message[] {
   if (messages.length <= maxMessages) return messages
 
-  const trimmed = messages.slice(-maxMessages)
-
-  // 避免从孤立 toolResult 开始
-  while (trimmed.length > 0 && trimmed[0]?.role === 'toolResult') {
-    trimmed.shift()
+  // 从末尾开始，保留完整 turn
+  // 策略：从后往前遍历，确保保留的消息序列以 user 或 assistant 开头，不以 toolResult 开头
+  let start = messages.length - maxMessages
+  while (start > 0 && messages[start]?.role === 'toolResult') {
+    start--
   }
+  // 再往前一步，确保我们从一个完整的 turn 开始（user 消息）
+  // 但如果 start 已经是 0，就不需要再调整了
+  // 实际上我们需要确保裁剪后的第一个消息不是 toolResult
+  // 上面的循环已经确保了这一点
 
-  return trimmed
+  return messages.slice(start)
 }
 
 export async function runAgentLoop(
@@ -84,22 +89,50 @@ export async function runAgentLoop(
     if (toolCalls.length === 0) {
       emit({ type: 'turn_end', message: assistantMsg, toolResults: [] })
       completed = true
+      // 普通聊天也执行 maxMessages 裁剪
+      if (config.maxMessages && context.messages.length > config.maxMessages) {
+        context.messages = trimMessagesByTurns(context.messages, config.maxMessages)
+      }
       break
     }
 
-    // 执行工具
+    // 执行工具（跳过参数解析失败的 tool call）
     const toolResults: ToolResultMessage[] = []
+    const validToolCalls = toolCalls.filter((tc) => !tc.isError)
+    const parseErrorCalls = toolCalls.filter((tc) => tc.isError)
 
-    if (config.toolExecution === 'parallel') {
-      const promises = toolCalls.map(async (tc: ToolCallContent) => {
-        return executeTool(tc.id, tc.name, tc.arguments, context.tools, emit, signal)
+    // 为解析失败的 tool call 直接生成错误结果
+    for (const tc of parseErrorCalls) {
+      const errorResult: ToolResultMessage = {
+        role: 'toolResult',
+        toolCallId: tc.id,
+        toolName: tc.name,
+        content: [{ type: 'text', text: `Tool call arguments parse error: ${tc.arguments.__error || 'unknown'}` }],
+        isError: true,
+        timestamp: Date.now(),
+      }
+      toolResults.push(errorResult)
+      emit({
+        type: 'tool_execution_end',
+        toolCallId: tc.id,
+        toolName: tc.name,
+        result: { content: errorResult.content },
+        isError: true,
       })
-      const results = await Promise.all(promises)
-      toolResults.push(...results)
-    } else {
-      for (const tc of toolCalls) {
-        const result = await executeTool(tc.id, tc.name, tc.arguments, context.tools, emit, signal)
-        toolResults.push(result)
+    }
+
+    if (validToolCalls.length > 0) {
+      if (config.toolExecution === 'parallel') {
+        const promises = validToolCalls.map(async (tc: ToolCallContent) => {
+          return executeTool(tc.id, tc.name, tc.arguments, context.tools, emit, signal)
+        })
+        const results = await Promise.all(promises)
+        toolResults.push(...results)
+      } else {
+        for (const tc of validToolCalls) {
+          const result = await executeTool(tc.id, tc.name, tc.arguments, context.tools, emit, signal)
+          toolResults.push(result)
+        }
       }
     }
 
