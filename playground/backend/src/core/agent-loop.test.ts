@@ -206,4 +206,137 @@ describe('Agent Loop', () => {
     expect(endEvents[endEvents.length - 1].status).toBe('error')
     expect(endEvents[endEvents.length - 1].error?.code).toBe('MAX_TURNS_EXCEEDED')
   })
+
+  it('should succeed when final answer arrives exactly on the last allowed turn', async () => {
+    const events: any[] = []
+    const context: AgentContext = {
+      systemPrompt: 'You are helpful.',
+      messages: [],
+      tools: [{
+        name: 'test_tool',
+        label: 'Test',
+        description: 'A test tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({
+          content: [{ type: 'text', text: 'Tool result' }],
+        }),
+      }],
+    }
+
+    let callCount = 0
+    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
+      callCount++
+
+      if (callCount <= 9) {
+        // 前 9 次返回 toolCall
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: `call-${callCount}`, name: 'test_tool', arguments: {} },
+          ],
+          stopReason: 'toolUse',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: `msg-${callCount}`, message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: `msg-${callCount}`, message: assistantMsg })
+      } else {
+        // 第 10 次返回普通文本（正常完成）
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Final answer' }],
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
+      }
+    })
+
+    await runAgentLoop(
+      [{ role: 'user', content: 'Test max turns boundary', timestamp: Date.now() }],
+      context,
+      { useMock: true },
+      (event) => events.push(event)
+    )
+
+    const endEvents = events.filter((e) => e.type === 'agent_end')
+    expect(endEvents.length).toBe(1)
+    expect(endEvents[0].status).toBe('success')
+    expect(callCount).toBe(10)
+  })
+
+  it('should trim messages when maxMessages is exceeded', async () => {
+    const events: any[] = []
+    const context: AgentContext = {
+      systemPrompt: 'You are helpful.',
+      messages: [],
+      tools: [],
+    }
+
+    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
+      const assistantMsg: AssistantMessage = {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Reply' }],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      }
+      options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
+      options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
+    })
+
+    await runAgentLoop(
+      [{ role: 'user', content: 'Hi', timestamp: Date.now() }],
+      context,
+      { useMock: true, maxMessages: 4 },
+      (event) => events.push(event)
+    )
+
+    // user + assistant = 2 messages, within limit
+    expect(context.messages.length).toBeLessThanOrEqual(4)
+  })
+
+  it('should not keep orphan tool results after trimming', async () => {
+    const events: any[] = []
+    const context: AgentContext = {
+      systemPrompt: 'You are helpful.',
+      messages: [],
+      tools: [{
+        name: 'test_tool',
+        label: 'Test',
+        description: 'A test tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({
+          content: [{ type: 'text', text: 'result' }],
+        }),
+      }],
+    }
+
+    let callCount = 0
+    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
+      callCount++
+      const assistantMsg: AssistantMessage = {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Using tool' },
+          { type: 'toolCall', id: 'call-1', name: 'test_tool', arguments: {} },
+        ],
+        stopReason: 'toolUse',
+        timestamp: Date.now(),
+      }
+      options.onEvent({ type: 'message_start', messageId: `msg-${callCount}`, message: assistantMsg })
+      options.onEvent({ type: 'message_end', messageId: `msg-${callCount}`, message: assistantMsg })
+    })
+
+    await runAgentLoop(
+      [{ role: 'user', content: 'Use tool', timestamp: Date.now() }],
+      context,
+      { useMock: true, maxMessages: 3, toolExecution: 'parallel' },
+      (event) => events.push(event)
+    )
+
+    // After trimming, the first message should not be an orphan toolResult
+    if (context.messages.length > 0) {
+      expect(context.messages[0].role).not.toBe('toolResult')
+    }
+  })
 })

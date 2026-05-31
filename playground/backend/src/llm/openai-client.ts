@@ -48,12 +48,16 @@ export async function openaiStream(
   let isCollectingToolCall = false
   let pendingToolCalls: Map<number, ToolCallBuffer> = new Map()
   let parseErrorLogged = false
+  const decoder = new TextDecoder()
 
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      buffer += decoder.decode()
+      break
+    }
 
-    buffer += new TextDecoder().decode(value)
+    buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
     buffer = lines.pop() || ''
 
@@ -149,7 +153,10 @@ export async function openaiStream(
 
           const assistantMsg: AssistantMessage = {
             role: 'assistant',
-            content: toolCallContent,
+            content: [
+              ...currentContent,
+              ...toolCallContent,
+            ],
             stopReason: 'toolUse',
             timestamp: Date.now(),
           }

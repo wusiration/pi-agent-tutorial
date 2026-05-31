@@ -7,6 +7,7 @@ export class Agent {
   private listeners: AgentEventListener[] = []
   private _isStreaming = false
   private abortController: AbortController | null = null
+  private maxMessages: number | undefined
 
   constructor(options: AgentOptions) {
     this.context = {
@@ -14,6 +15,7 @@ export class Agent {
       messages: options.initialState.messages || [],
       tools: options.initialState.tools || [],
     }
+    this.maxMessages = options.maxMessages
   }
 
   get state(): AgentState {
@@ -67,7 +69,7 @@ export class Agent {
       await runAgentLoop(
         [userMsg],
         this.context,
-        { useMock: options?.useMock, toolExecution: 'parallel' },
+        { useMock: options?.useMock, toolExecution: 'parallel', maxMessages: this.maxMessages },
         (event) => this.emit(event),
         signal
       )

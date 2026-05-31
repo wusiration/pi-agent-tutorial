@@ -28,6 +28,10 @@ export class SessionManager {
     this.startCleanupTimer()
   }
 
+  getMaxMessages(): number {
+    return this.options.maxMessages
+  }
+
   create(sessionId: string, agent: Agent): void {
     this.evictIfNeeded()
 
@@ -131,6 +135,8 @@ export class SessionManager {
     this.cleanupTimer = setInterval(() => {
       this.cleanup()
     }, 10 * 60 * 1000)
+    // 不阻止进程自然退出
+    this.cleanupTimer.unref()
   }
 
   dispose(): void {

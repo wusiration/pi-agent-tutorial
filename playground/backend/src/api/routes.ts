@@ -33,6 +33,7 @@ function createAgent(): Agent {
       messages: [],
       tools: [weatherTool, calculatorTool, searchTool],
     },
+    maxMessages: sessionManager.getMaxMessages(),
   })
 }
 
@@ -87,7 +88,11 @@ export async function registerRoutes(app: FastifyInstance) {
       return { error: 'sessionId is required. Call POST /api/sessions first.' }
     }
 
-    const agent = getOrCreateAgent(sessionId)
+    const agent = sessionManager.getAgent(sessionId)
+    if (!agent) {
+      reply.status(404)
+      return { error: 'Session not found', code: 'SESSION_NOT_FOUND' }
+    }
     const sse = new SSEConnection(reply)
     let unsubscribe: (() => void) | null = null
 
@@ -181,5 +186,10 @@ export async function registerRoutes(app: FastifyInstance) {
       messages: agent.state.messages,
       exportedAt: new Date().toISOString(),
     }
+  })
+
+  // 服务关闭时释放资源
+  app.addHook('onClose', async () => {
+    sessionManager.dispose()
   })
 }

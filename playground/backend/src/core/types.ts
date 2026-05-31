@@ -34,6 +34,7 @@ export interface AgentState {
 export interface AgentOptions {
   initialState: Partial<AgentState>
   toolExecution?: 'sequential' | 'parallel'
+  maxMessages?: number
 }
 
 export type AgentEventListener = (event: AgentEvent) => void | Promise<void>
@@ -41,4 +42,5 @@ export type AgentEventListener = (event: AgentEvent) => void | Promise<void>
 export interface LoopConfig {
   useMock?: boolean
   toolExecution?: 'sequential' | 'parallel'
+  maxMessages?: number
 }

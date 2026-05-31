@@ -1,6 +1,12 @@
 import { useState, useCallback, useRef } from 'react'
 import type { AgentEvent } from '../../../shared/types'
 
+async function ensureOk(response: Response): Promise<Response> {
+  if (response.ok) return response
+  const body = await response.json().catch(() => null)
+  throw new Error(body?.error || body?.message || `HTTP ${response.status}`)
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -21,6 +27,7 @@ export function useAgent() {
 
   const createSession = useCallback(async () => {
     const res = await fetch('/api/sessions', { method: 'POST' })
+    await ensureOk(res)
     const data = await res.json()
     setSessionId(data.sessionId)
     setMessages([])
@@ -31,6 +38,7 @@ export function useAgent() {
 
   const loadHistory = useCallback(async (sid: string) => {
     const res = await fetch(`/api/history?sessionId=${sid}`)
+    await ensureOk(res)
     const data = await res.json()
     const history: ChatMessage[] = data.messages.map((m: any, idx: number) => ({
       id: `h-${idx}`,
@@ -74,6 +82,8 @@ export function useAgent() {
         body: JSON.stringify({ message: text, sessionId: currentSessionId, useMock }),
         signal: abortRef.current.signal,
       })
+
+      await ensureOk(response)
 
       if (!response.body) throw new Error('No response body')
 
@@ -164,6 +174,8 @@ export function useAgent() {
           }
           return prev
         })
+        // 清理映射，避免 Map 持续增长
+        assistantMessageIds.current.delete(event.messageId)
         break
       }
 

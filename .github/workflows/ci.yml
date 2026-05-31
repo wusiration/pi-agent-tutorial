@@ -44,11 +44,11 @@ jobs:
           npm ci
           npm run build
 
-      - name: Example build
+      - name: Example typecheck
         working-directory: examples/01-manual-loop
         run: |
           npm ci
-          npm run build --if-present
+          npm run typecheck
 
   build-docs:
     runs-on: ubuntu-latest

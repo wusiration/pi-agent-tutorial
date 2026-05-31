@@ -11,6 +11,20 @@ function isAssistantMessage(msg: Message): msg is AssistantMessage {
   return msg.role === 'assistant'
 }
 
+// 按完整 turn 裁剪消息，避免孤立 toolResult
+function trimMessagesByTurns(messages: Message[], maxMessages: number): Message[] {
+  if (messages.length <= maxMessages) return messages
+
+  const trimmed = messages.slice(-maxMessages)
+
+  // 避免从孤立 toolResult 开始
+  while (trimmed.length > 0 && trimmed[0]?.role === 'toolResult') {
+    trimmed.shift()
+  }
+
+  return trimmed
+}
+
 export async function runAgentLoop(
   userMessages: Message[],
   context: AgentContext,
@@ -32,6 +46,7 @@ export async function runAgentLoop(
 
   let turnCount = 0
   const maxTurns = 10
+  let completed = false
 
   while (turnCount < maxTurns) {
     if (signal?.aborted) {
@@ -49,7 +64,10 @@ export async function runAgentLoop(
 
     // 调用 LLM
     const result = await callLLM(context, config, emit, signal)
-    if (!result.message) break
+    if (!result.message) {
+      completed = true
+      break
+    }
 
     const assistantMsg = result.message
     context.messages.push(assistantMsg)
@@ -58,12 +76,14 @@ export async function runAgentLoop(
     // 检查是否有工具调用（只对 assistant 消息）
     if (!isAssistantMessage(assistantMsg)) {
       emit({ type: 'turn_end', message: assistantMsg, toolResults: [] })
+      completed = true
       break
     }
 
     const toolCalls = assistantMsg.content.filter(isToolCallContent)
     if (toolCalls.length === 0) {
       emit({ type: 'turn_end', message: assistantMsg, toolResults: [] })
+      completed = true
       break
     }
 
@@ -90,10 +110,15 @@ export async function runAgentLoop(
     }
 
     emit({ type: 'turn_end', message: assistantMsg, toolResults })
+
+    // 每轮结束后裁剪消息数量
+    if (config.maxMessages && context.messages.length > config.maxMessages) {
+      context.messages = trimMessagesByTurns(context.messages, config.maxMessages)
+    }
   }
 
-  // maxTurns 达到上限时的明确处理
-  if (turnCount >= maxTurns) {
+  // maxTurns 达到上限且未正常完成时的处理
+  if (!completed && turnCount >= maxTurns) {
     console.error('[AgentLoop] MAX_TURNS_EXCEEDED', {
       turnCount,
       messageCount: context.messages.length,
