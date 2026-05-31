@@ -11,23 +11,39 @@ function isAssistantMessage(msg: Message): msg is AssistantMessage {
   return msg.role === 'assistant'
 }
 
-// 按完整 turn 裁剪消息，避免孤立 toolResult
-// 一个完整 turn = assistant + 0..n toolResult（如果有 toolCall）
+// 按完整 turn 裁剪消息
+// 策略：将消息按 user 分割成 turn，从后往前保留完整 turn，不拆散 assistant(toolCall) + toolResult
 function trimMessagesByTurns(messages: Message[], maxMessages: number): Message[] {
   if (messages.length <= maxMessages) return messages
 
-  // 从末尾开始，保留完整 turn
-  // 策略：从后往前遍历，确保保留的消息序列以 user 或 assistant 开头，不以 toolResult 开头
-  let start = messages.length - maxMessages
-  while (start > 0 && messages[start]?.role === 'toolResult') {
-    start--
-  }
-  // 再往前一步，确保我们从一个完整的 turn 开始（user 消息）
-  // 但如果 start 已经是 0，就不需要再调整了
-  // 实际上我们需要确保裁剪后的第一个消息不是 toolResult
-  // 上面的循环已经确保了这一点
+  // 将消息按 user 分割成 turn
+  const turns: Message[][] = []
+  let currentTurn: Message[] = []
 
-  return messages.slice(start)
+  for (const message of messages) {
+    if (message.role === 'user' && currentTurn.length > 0) {
+      turns.push(currentTurn)
+      currentTurn = []
+    }
+    currentTurn.push(message)
+  }
+
+  if (currentTurn.length > 0) {
+    turns.push(currentTurn)
+  }
+
+  // 从后往前保留完整 turn
+  const kept: Message[] = []
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const candidate = turns[i]
+    // 如果加入这个 turn 会超过限制，且已经有保留内容，则停止
+    if (kept.length > 0 && kept.length + candidate.length > maxMessages) {
+      break
+    }
+    kept.unshift(...candidate)
+  }
+
+  return kept
 }
 
 export async function runAgentLoop(

@@ -249,7 +249,7 @@ async function main() {
   await runAgentLoop('北京天气怎么样？', context)
 
   // 模拟对话 3：再次触发工具
-  await runAgentLoop('上海呢？', context)
+  await runAgentLoop('上海天气怎么样？', context)
 
   console.log('\n=== 对话历史 ===')
   for (const msg of context.messages) {

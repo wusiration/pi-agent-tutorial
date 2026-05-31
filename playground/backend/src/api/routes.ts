@@ -149,12 +149,25 @@ export async function registerRoutes(app: FastifyInstance) {
     schema: {
       body: ResetRequestSchema,
     },
-  }, async (request) => {
+  }, async (request, reply) => {
     const body = request.body as Static<typeof ResetRequestSchema>
     const sessionId = body.sessionId
     if (!sessionId) {
+      reply.status(400)
       return { success: false, error: 'sessionId is required' }
     }
+
+    const agent = sessionManager.getAgent(sessionId)
+    if (!agent) {
+      reply.status(404)
+      return { success: false, code: 'SESSION_NOT_FOUND', error: 'Session not found' }
+    }
+
+    if (agent.state.isStreaming) {
+      reply.status(409)
+      return { success: false, code: 'AGENT_BUSY', error: 'Cannot reset while agent is streaming' }
+    }
+
     sessionManager.clear(sessionId)
     return { success: true }
   })

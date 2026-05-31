@@ -339,4 +339,112 @@ describe('Agent Loop', () => {
       expect(context.messages[0].role).not.toBe('toolResult')
     }
   })
+
+  it('should trim normal chat messages when maxMessages is exceeded', async () => {
+    const events: any[] = []
+    const context: AgentContext = {
+      systemPrompt: 'You are helpful.',
+      messages: [],
+      tools: [],
+    }
+
+    // 预先插入 5 轮历史（10 条消息）
+    for (let i = 0; i < 5; i++) {
+      context.messages.push({ role: 'user', content: `Q${i}`, timestamp: Date.now() })
+      context.messages.push({ role: 'assistant', content: [{ type: 'text', text: `A${i}` }], stopReason: 'stop', timestamp: Date.now() })
+    }
+
+    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
+      const assistantMsg: AssistantMessage = {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Final' }],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      }
+      options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
+      options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
+    })
+
+    await runAgentLoop(
+      [{ role: 'user', content: 'Hi', timestamp: Date.now() }],
+      context,
+      { useMock: true, maxMessages: 4 },
+      (event) => events.push(event)
+    )
+
+    // 应该保留最近 2 个完整 turn（4 条消息）
+    expect(context.messages.length).toBeLessThanOrEqual(4)
+    // 第一条应该是 user（完整 turn 开始）
+    expect(context.messages[0].role).toBe('user')
+  })
+
+  it('should keep complete turns including toolCall and toolResult when trimming', async () => {
+    const events: any[] = []
+    const context: AgentContext = {
+      systemPrompt: 'You are helpful.',
+      messages: [],
+      tools: [{
+        name: 'test_tool',
+        label: 'Test',
+        description: 'A test tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({
+          content: [{ type: 'text', text: 'result' }],
+        }),
+      }],
+    }
+
+    // 预先插入 2 轮带工具的完整历史（每轮 user + assistant(toolCall) + toolResult = 3 条）
+    for (let i = 0; i < 2; i++) {
+      context.messages.push({ role: 'user', content: `Q${i}`, timestamp: Date.now() })
+      context.messages.push({
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Using tool' },
+          { type: 'toolCall', id: `call-${i}`, name: 'test_tool', arguments: {} },
+        ],
+        stopReason: 'toolUse',
+        timestamp: Date.now(),
+      })
+      context.messages.push({
+        role: 'toolResult',
+        toolCallId: `call-${i}`,
+        toolName: 'test_tool',
+        content: [{ type: 'text', text: `result-${i}` }],
+        isError: false,
+        timestamp: Date.now(),
+      })
+    }
+
+    // 第 3 轮：assistant 给出最终回答（普通文本）
+    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
+      const assistantMsg: AssistantMessage = {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Final answer' }],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      }
+      options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
+      options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
+    })
+
+    await runAgentLoop(
+      [{ role: 'user', content: 'Final question', timestamp: Date.now() }],
+      context,
+      { useMock: true, maxMessages: 5, toolExecution: 'parallel' },
+      (event) => events.push(event)
+    )
+
+    // 最近一轮 user + assistant(final) = 2 条，加上上一轮完整 turn = 5 条
+    // 但如果限制为 5，应该保留最近一轮（2 条）或最近一轮+上一轮（5 条）
+    expect(context.messages.length).toBeLessThanOrEqual(5)
+    // 第一条不应该是孤立的 toolResult
+    expect(context.messages[0].role).not.toBe('toolResult')
+    // 如果保留了 toolCall，toolResult 也应该在
+    const hasToolCall = context.messages.some((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((c: any) => c.type === 'toolCall'))
+    if (hasToolCall) {
+      const hasToolResult = context.messages.some((m) => m.role === 'toolResult')
+      expect(hasToolResult).toBe(true)
+    }
+  })
 })
