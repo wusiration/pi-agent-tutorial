@@ -49,7 +49,7 @@ jobs:
         run: |
           npm ci
           npm run typecheck
-          timeout 10s npm run start || true
+          timeout 10s npm run start
 
   build-docs:
     runs-on: ubuntu-latest
