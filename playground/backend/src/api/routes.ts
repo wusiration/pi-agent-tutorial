@@ -9,13 +9,13 @@ import type { ChatRequest } from '../../../shared/types.js'
 
 // 请求体验证 Schema
 const ChatRequestSchema = Type.Object({
-  message: Type.String({ minLength: 1, maxLength: 4000 }),
-  sessionId: Type.Optional(Type.String()),
+  message: Type.String({ minLength: 1, maxLength: 8000 }),
+  sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   useMock: Type.Optional(Type.Boolean()),
 })
 
 const ResetRequestSchema = Type.Object({
-  sessionId: Type.Optional(Type.String()),
+  sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 })
 
 // 会话管理器（带 TTL 和容量限制）
@@ -76,16 +76,26 @@ export async function registerRoutes(app: FastifyInstance) {
     },
   }, async (request, reply) => {
     const body = request.body as Static<typeof ChatRequestSchema>
-    const sessionId = body.sessionId || 'default'
-    const agent = getOrCreateAgent(sessionId)
 
+    // 不再回退到 'default'，没有 sessionId 时自动创建新会话
+    let sessionId = body.sessionId
+    if (!sessionId) {
+      sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      getOrCreateAgent(sessionId)
+    }
+
+    const agent = getOrCreateAgent(sessionId)
     const sse = new SSEConnection(reply)
     let unsubscribe: (() => void) | null = null
+
+    // 每个请求独立的 AbortController
+    const controller = new AbortController()
+    agent.setAbortController(controller)
 
     // 客户端断开时清理
     request.raw.on('close', () => {
       if (!sse.isClosed()) {
-        agent.abort()
+        controller.abort()
         sse.close()
         unsubscribe?.()
       }
@@ -94,7 +104,7 @@ export async function registerRoutes(app: FastifyInstance) {
     // 订阅事件并转发到 SSE
     unsubscribe = agent.subscribe((event) => {
       sse.send(event)
-      if (event.type === 'agent_end') {
+      if (event.type === 'agent_end' || event.type === 'agent_error') {
         sse.close()
         unsubscribe?.()
       }
@@ -102,18 +112,14 @@ export async function registerRoutes(app: FastifyInstance) {
 
     // 启动 Agent
     try {
-      await agent.prompt(body.message, { useMock: body.useMock })
+      await agent.prompt(body.message, { useMock: body.useMock, signal: controller.signal })
     } catch (error: any) {
-      if (error.message !== 'Aborted') {
+      if (error.message !== 'Aborted' && error.name !== 'AbortError') {
+        console.error('[API /chat] Agent error:', error)
         sse.send({
-          type: 'message_end',
-          messageId: `err-${Date.now()}`,
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: `Error: ${error.message}` }],
-            stopReason: 'error',
-            timestamp: Date.now(),
-          },
+          type: 'agent_error',
+          code: 'INTERNAL_ERROR',
+          message: error.message || '未知错误',
         })
       }
       sse.close()
@@ -129,7 +135,10 @@ export async function registerRoutes(app: FastifyInstance) {
     },
   }, async (request) => {
     const body = request.body as Static<typeof ResetRequestSchema>
-    const sessionId = body.sessionId || 'default'
+    const sessionId = body.sessionId
+    if (!sessionId) {
+      return { success: false, error: 'sessionId is required' }
+    }
     const agent = agents.get(sessionId)
     if (agent) {
       agent.reset()
@@ -139,16 +148,28 @@ export async function registerRoutes(app: FastifyInstance) {
   })
 
   // 获取会话历史
-  app.get('/api/history', async (request) => {
+  app.get('/api/history', async (request, reply) => {
     const { sessionId } = request.query as { sessionId?: string }
-    const agent = agents.get(sessionId || 'default')
-    return { messages: agent?.state.messages || [] }
+    if (!sessionId) {
+      reply.status(400)
+      return { error: 'sessionId is required' }
+    }
+    const agent = agents.get(sessionId)
+    if (!agent) {
+      reply.status(404)
+      return { error: 'Session not found' }
+    }
+    return { messages: agent.state.messages || [] }
   })
 
   // 导出会话
   app.get('/api/export', async (request, reply) => {
     const { sessionId } = request.query as { sessionId?: string }
-    const agent = agents.get(sessionId || 'default')
+    if (!sessionId) {
+      reply.status(400)
+      return { error: 'sessionId is required' }
+    }
+    const agent = agents.get(sessionId)
     if (!agent) {
       reply.status(404)
       return { error: 'Session not found' }

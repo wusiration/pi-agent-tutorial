@@ -7,7 +7,7 @@ export function Chat() {
   const [input, setInput] = useState('')
   const [useMock, setUseMock] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const { messages, isLoading, sessionId, createSession, sendMessage, reset, exportSession } = useAgent()
+  const { messages, isLoading, error, sessionId, createSession, sendMessage, reset, exportSession, abort } = useAgent()
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -26,7 +26,9 @@ export function Chat() {
       <div className="bg-white border-b px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Pi Agent 教学版</h1>
-          <span className="text-xs text-gray-400 font-mono">{sessionId.slice(0, 12)}...</span>
+          <span className="text-xs text-gray-400 font-mono">
+            {sessionId ? `${sessionId.slice(0, 12)}...` : '未连接'}
+          </span>
         </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
@@ -46,18 +48,35 @@ export function Chat() {
           </button>
           <button
             onClick={exportSession}
-            className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded"
+            disabled={!sessionId}
+            className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded disabled:opacity-50"
           >
             导出
           </button>
           <button
             onClick={reset}
-            className="text-sm text-gray-500 hover:text-gray-700"
+            disabled={!sessionId}
+            className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50"
           >
             重置
           </button>
+          {isLoading && (
+            <button
+              onClick={abort}
+              className="text-sm text-red-500 hover:text-red-700"
+            >
+              中止
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700">
+          ⚠️ {error}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2">

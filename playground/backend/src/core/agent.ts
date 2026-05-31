@@ -44,13 +44,19 @@ export class Agent {
     }
   }
 
-  async prompt(message: string | Message, options?: { useMock?: boolean }): Promise<void> {
+  async prompt(
+    message: string | Message,
+    options?: { useMock?: boolean; signal?: AbortSignal }
+  ): Promise<void> {
     if (this._isStreaming) {
       throw new Error('Agent is already streaming')
     }
 
     this._isStreaming = true
-    this.abortController = new AbortController()
+    // 如果外部传入 signal，使用外部传入的；否则自己创建
+    const externalSignal = options?.signal
+    const internalController = externalSignal ? null : new AbortController()
+    const signal = externalSignal || internalController!.signal
 
     const userMsg: Message =
       typeof message === 'string'
@@ -63,16 +69,23 @@ export class Agent {
         this.context,
         { useMock: options?.useMock, toolExecution: 'parallel' },
         (event) => this.emit(event),
-        this.abortController.signal
+        signal
       )
     } finally {
       this._isStreaming = false
-      this.abortController = null
+      // 只有内部创建的 controller 才需要清理
+      if (internalController) {
+        // 不需要额外操作
+      }
     }
   }
 
   abort(): void {
     this.abortController?.abort()
+  }
+
+  setAbortController(controller: AbortController | null): void {
+    this.abortController = controller
   }
 
   reset() {

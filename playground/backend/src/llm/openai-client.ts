@@ -7,6 +7,12 @@ interface OpenAIStreamOptions {
   onEvent: (event: AgentEvent) => void
 }
 
+interface ToolCallBuffer {
+  id: string
+  name: string
+  argumentsText: string
+}
+
 export async function openaiStream(
   messages: Message[],
   tools: ToolDefinition[],
@@ -40,7 +46,8 @@ export async function openaiStream(
   let currentMessageId = ''
   let currentContent: any[] = []
   let isCollectingToolCall = false
-  let pendingToolCalls: Map<number, { id: string; name: string; args: string }> = new Map()
+  let pendingToolCalls: Map<number, ToolCallBuffer> = new Map()
+  let parseErrorLogged = false
 
   while (true) {
     const { done, value } = await reader.read()
@@ -63,8 +70,8 @@ export async function openaiStream(
         const delta = choice.delta
         const finishReason = choice.finish_reason
 
-        // 初始化消息
-        if (!currentMessageId && delta?.content !== undefined) {
+        // 初始化消息（文本或 tool_calls 开始时）
+        if (!currentMessageId && (delta?.content !== undefined || delta?.tool_calls !== undefined)) {
           currentMessageId = `msg-${Date.now()}`
           currentContent = []
           options.onEvent({
@@ -88,23 +95,24 @@ export async function openaiStream(
           })
         }
 
-        // 处理 tool_calls（流式增量）
+        // 处理 tool_calls（流式增量）—— 按 index 累积参数字符串
         if (delta?.tool_calls) {
           isCollectingToolCall = true
 
           for (const tc of delta.tool_calls) {
-            const existing = pendingToolCalls.get(tc.index)
+            const index = tc.index as number
+            const existing = pendingToolCalls.get(index)
             if (existing) {
               // 追加增量
               if (tc.function?.name) existing.name += tc.function.name
-              if (tc.function?.arguments) existing.args += tc.function.arguments
+              if (tc.function?.arguments) existing.argumentsText += tc.function.arguments
               if (tc.id) existing.id = tc.id
             } else {
               // 新的 tool call
-              pendingToolCalls.set(tc.index, {
+              pendingToolCalls.set(index, {
                 id: tc.id || '',
                 name: tc.function?.name || '',
-                args: tc.function?.arguments || '',
+                argumentsText: tc.function?.arguments || '',
               })
             }
           }
@@ -112,13 +120,31 @@ export async function openaiStream(
 
         // 完成时处理
         if (finishReason === 'tool_calls' || (finishReason === 'stop' && isCollectingToolCall)) {
-          // 构建完整的 toolCall 内容
-          const toolCallContent = Array.from(pendingToolCalls.values()).map((tc) => ({
-            type: 'toolCall' as const,
-            id: tc.id,
-            name: tc.name,
-            arguments: safeParseArgs(tc.args),
-          }))
+          // 流结束，统一解析所有 tool call 参数
+          const toolCallContent = Array.from(pendingToolCalls.entries()).map(([index, tc]) => {
+            let parsedArgs: Record<string, any> = {}
+            try {
+              parsedArgs = JSON.parse(tc.argumentsText || '{}')
+            } catch (parseErr: any) {
+              if (!parseErrorLogged) {
+                console.error(`[OpenAI Stream] Tool call ${tc.id} (${tc.name}) arguments parse failed:`, {
+                  index,
+                  argumentsText: tc.argumentsText,
+                  error: parseErr.message,
+                })
+                parseErrorLogged = true
+              }
+              // 回传解析错误，让调用方知道
+              parsedArgs = { __parseError: true, __raw: tc.argumentsText, __error: parseErr.message }
+            }
+
+            return {
+              type: 'toolCall' as const,
+              id: tc.id || `call-${index}-${Date.now()}`,
+              name: tc.name,
+              arguments: parsedArgs,
+            }
+          })
 
           const assistantMsg: AssistantMessage = {
             role: 'assistant',
@@ -138,6 +164,7 @@ export async function openaiStream(
           currentContent = []
           pendingToolCalls.clear()
           isCollectingToolCall = false
+          parseErrorLogged = false
           return
         }
 
@@ -165,8 +192,13 @@ export async function openaiStream(
           currentContent = []
           return
         }
-      } catch {
-        // 忽略解析错误，继续处理下一行
+      } catch (err: any) {
+        // 记录解析错误，不静默吞掉
+        console.error('[OpenAI Stream] Chunk parse error:', {
+          line: line.slice(0, 200),
+          error: err.message,
+        })
+        continue
       }
     }
   }
@@ -242,13 +274,5 @@ function convertTool(tool: ToolDefinition): any {
       description: tool.description,
       parameters: tool.parameters,
     },
-  }
-}
-
-function safeParseArgs(argsStr: string): Record<string, any> {
-  try {
-    return JSON.parse(argsStr)
-  } catch {
-    return {}
   }
 }

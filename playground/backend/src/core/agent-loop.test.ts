@@ -163,4 +163,46 @@ describe('Agent Loop', () => {
       controller.signal
     )).rejects.toThrow('Aborted')
   })
+
+  it('should emit agent_error when maxTurns exceeded', async () => {
+    const events: any[] = []
+    const context: AgentContext = {
+      systemPrompt: 'You are helpful.',
+      messages: [],
+      tools: [{
+        name: 'loop_tool',
+        label: 'Loop',
+        description: 'Always returns tool call',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({
+          content: [{ type: 'text', text: 'loop' }],
+        }),
+      }],
+    }
+
+    // Mock 永远返回 toolCall，模拟无限循环
+    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
+      const assistantMsg: AssistantMessage = {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'call-loop', name: 'loop_tool', arguments: {} },
+        ],
+        stopReason: 'toolUse',
+        timestamp: Date.now(),
+      }
+      options.onEvent({ type: 'message_start', message: assistantMsg })
+      options.onEvent({ type: 'message_end', messageId: 'msg-loop', message: assistantMsg })
+    })
+
+    await runAgentLoop(
+      [{ role: 'user', content: 'Loop forever', timestamp: Date.now() }],
+      context,
+      { useMock: true },
+      (event) => events.push(event)
+    )
+
+    const errorEvents = events.filter((e) => e.type === 'agent_error')
+    expect(errorEvents.length).toBeGreaterThan(0)
+    expect(errorEvents[0].code).toBe('MAX_TURNS_EXCEEDED')
+  })
 })

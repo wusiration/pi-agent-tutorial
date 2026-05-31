@@ -14,7 +14,8 @@ export interface ChatMessage {
 export function useAgent() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId, setSessionId] = useState<string>('default')
+  const [error, setError] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string>('')
   const abortRef = useRef<AbortController | null>(null)
   const assistantMessageIds = useRef<Map<string, string>>(new Map())
 
@@ -23,6 +24,7 @@ export function useAgent() {
     const data = await res.json()
     setSessionId(data.sessionId)
     setMessages([])
+    setError(null)
     assistantMessageIds.current.clear()
     return data.sessionId as string
   }, [])
@@ -41,9 +43,19 @@ export function useAgent() {
     }))
     setMessages(history)
     setSessionId(sid)
+    setError(null)
   }, [])
 
   const sendMessage = useCallback(async (text: string, useMock?: boolean) => {
+    // 如果没有 sessionId，先创建一个
+    let currentSessionId = sessionId
+    if (!currentSessionId) {
+      const res = await fetch('/api/sessions', { method: 'POST' })
+      const data = await res.json()
+      currentSessionId = data.sessionId
+      setSessionId(currentSessionId)
+    }
+
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
@@ -51,6 +63,7 @@ export function useAgent() {
     }
     setMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
+    setError(null)
 
     abortRef.current = new AbortController()
 
@@ -58,7 +71,7 @@ export function useAgent() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, sessionId, useMock }),
+        body: JSON.stringify({ message: text, sessionId: currentSessionId, useMock }),
         signal: abortRef.current.signal,
       })
 
@@ -85,12 +98,13 @@ export function useAgent() {
             const event: AgentEvent = JSON.parse(data)
             handleEvent(event)
           } catch {
-            // ignore
+            // ignore parse error for individual events
           }
         }
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {
+        setError(error.message || '请求失败')
         setMessages((prev) => [
           ...prev,
           { id: `err-${Date.now()}`, role: 'assistant', content: `Error: ${error.message}`, isError: true },
@@ -185,6 +199,12 @@ export function useAgent() {
         break
       }
 
+      case 'agent_error': {
+        setError(event.message)
+        setIsLoading(false)
+        break
+      }
+
       case 'agent_end': {
         setIsLoading(false)
         break
@@ -193,12 +213,14 @@ export function useAgent() {
   }, [])
 
   const reset = useCallback(async () => {
+    if (!sessionId) return
     await fetch('/api/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId }),
     })
     setMessages([])
+    setError(null)
     assistantMessageIds.current.clear()
   }, [sessionId])
 
@@ -207,6 +229,7 @@ export function useAgent() {
   }, [])
 
   const exportSession = useCallback(async () => {
+    if (!sessionId) return
     const res = await fetch(`/api/export?sessionId=${sessionId}`)
     const data = await res.json()
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -221,6 +244,7 @@ export function useAgent() {
   return {
     messages,
     isLoading,
+    error,
     sessionId,
     createSession,
     loadHistory,

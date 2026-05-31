@@ -68,6 +68,7 @@ export interface ToolResult {
 export type AgentEvent =
   | { type: 'agent_start' }
   | { type: 'agent_end'; messages: Message[] }
+  | { type: 'agent_error'; code: string; message: string }
   | { type: 'turn_start' }
   | { type: 'turn_end'; message: Message; toolResults: ToolResultMessage[] }
   | { type: 'message_start'; message: Message }

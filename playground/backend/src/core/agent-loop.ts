@@ -33,7 +33,14 @@ export async function runAgentLoop(
   const maxTurns = 10
 
   while (turnCount < maxTurns) {
-    if (signal?.aborted) break
+    if (signal?.aborted) {
+      emit({
+        type: 'agent_error',
+        code: 'ABORTED',
+        message: '请求已中止',
+      })
+      break
+    }
     turnCount++
 
     emit({ type: 'turn_start' })
@@ -83,6 +90,20 @@ export async function runAgentLoop(
     emit({ type: 'turn_end', message: assistantMsg, toolResults })
   }
 
+  // maxTurns 达到上限时的明确处理
+  if (turnCount >= maxTurns) {
+    console.error('[AgentLoop] MAX_TURNS_EXCEEDED', {
+      turnCount,
+      messageCount: context.messages.length,
+      lastMessageRole: context.messages.at(-1)?.role,
+    })
+    emit({
+      type: 'agent_error',
+      code: 'MAX_TURNS_EXCEEDED',
+      message: '已达到最大工具调用轮数（10 轮），请调整问题或缩小任务范围。',
+    })
+  }
+
   emit({ type: 'agent_end', messages: context.messages })
   return newMessages
 }
@@ -106,10 +127,23 @@ async function callLLM(
     }
   }
 
-  if (config.useMock) {
-    await mockStream(context.messages, context.tools, { onEvent }, signal)
-  } else {
-    await openaiStream(context.messages, context.tools, { onEvent }, signal)
+  try {
+    if (config.useMock) {
+      await mockStream(context.messages, context.tools, { onEvent }, signal)
+    } else {
+      await openaiStream(context.messages, context.tools, { onEvent }, signal)
+    }
+  } catch (error: any) {
+    if (error.message === 'Aborted' || error.name === 'AbortError') {
+      throw error // 重新抛出中止错误
+    }
+    console.error('[callLLM] LLM request failed:', error)
+    emit({
+      type: 'agent_error',
+      code: 'MODEL_ERROR',
+      message: `LLM 请求失败: ${error.message}`,
+    })
+    throw error
   }
 
   return result
@@ -133,6 +167,27 @@ async function executeTool(
       toolCallId,
       toolName,
       content: [{ type: 'text', text: `工具未找到: ${toolName}` }],
+      isError: true,
+      timestamp: Date.now(),
+    }
+    emit({
+      type: 'tool_execution_end',
+      toolCallId,
+      toolName,
+      result: { content: errorResult.content },
+      isError: true,
+    })
+    return errorResult
+  }
+
+  // 工具参数运行时校验
+  const validationError = validateToolArgs(tool, args)
+  if (validationError) {
+    const errorResult: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId,
+      toolName,
+      content: [{ type: 'text', text: `工具参数错误: ${validationError}` }],
       isError: true,
       timestamp: Date.now(),
     }
@@ -189,4 +244,59 @@ async function executeTool(
     })
     return toolResult
   }
+}
+
+// 工具参数运行时校验
+function validateToolArgs(tool: AgentTool, args: Record<string, any>): string | null {
+  const schema = tool.parameters
+  if (!schema || schema.type !== 'object') return null
+
+  const required = schema.required || []
+  const properties = schema.properties || {}
+
+  // 检查必填字段
+  for (const key of required) {
+    if (args[key] === undefined || args[key] === null || args[key] === '') {
+      return `缺少必填参数: ${key}`
+    }
+  }
+
+  // 检查类型和约束
+  for (const [key, value] of Object.entries(args)) {
+    const propSchema = properties[key]
+    if (!propSchema) continue
+
+    // 类型检查
+    if (propSchema.type === 'string' && typeof value !== 'string') {
+      return `参数 ${key} 应为字符串，实际为 ${typeof value}`
+    }
+    if (propSchema.type === 'number' && typeof value !== 'number') {
+      return `参数 ${key} 应为数字，实际为 ${typeof value}`
+    }
+    if (propSchema.type === 'boolean' && typeof value !== 'boolean') {
+      return `参数 ${key} 应为布尔值，实际为 ${typeof value}`
+    }
+
+    // 字符串长度检查
+    if (propSchema.type === 'string' && typeof value === 'string') {
+      if (propSchema.minLength !== undefined && value.length < propSchema.minLength) {
+        return `参数 ${key} 长度应 >= ${propSchema.minLength}`
+      }
+      if (propSchema.maxLength !== undefined && value.length > propSchema.maxLength) {
+        return `参数 ${key} 长度应 <= ${propSchema.maxLength}`
+      }
+    }
+
+    // 数字范围检查
+    if (propSchema.type === 'number' && typeof value === 'number') {
+      if (propSchema.minimum !== undefined && value < propSchema.minimum) {
+        return `参数 ${key} 应 >= ${propSchema.minimum}`
+      }
+      if (propSchema.maximum !== undefined && value > propSchema.maximum) {
+        return `参数 ${key} 应 <= ${propSchema.maximum}`
+      }
+    }
+  }
+
+  return null
 }
