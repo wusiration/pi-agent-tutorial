@@ -34,7 +34,7 @@ export async function mockStream(
       timestamp: Date.now(),
     }
 
-    options.onEvent({ type: 'message_start', message: assistantMsg })
+    options.onEvent({ type: 'message_start', messageId, message: assistantMsg })
     for (let i = 0; i < reply.length; i++) {
       if (signal?.aborted) break
       await delay(30, signal)
@@ -102,7 +102,7 @@ export async function mockStream(
         timestamp: Date.now(),
       }
 
-      options.onEvent({ type: 'message_start', message: assistantMsg })
+      options.onEvent({ type: 'message_start', messageId, message: assistantMsg })
       options.onEvent({ type: 'message_update', messageId, delta: '我来帮您处理这个请求。' })
       options.onEvent({ type: 'message_end', messageId, message: assistantMsg })
       return
@@ -118,7 +118,7 @@ export async function mockStream(
     timestamp: Date.now(),
   }
 
-  options.onEvent({ type: 'message_start', message: assistantMsg })
+  options.onEvent({ type: 'message_start', messageId, message: assistantMsg })
 
   for (let i = 0; i < reply.length; i++) {
     if (signal?.aborted) break
@@ -135,11 +135,18 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
       reject(new Error('Aborted'))
       return
     }
-    const timer = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => {
+
+    const onAbort = () => {
       clearTimeout(timer)
       reject(new Error('Aborted'))
-    })
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 

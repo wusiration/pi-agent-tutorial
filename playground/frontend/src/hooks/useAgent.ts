@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import type { AgentEvent, Message } from '../../../shared/types'
+import type { AgentEvent } from '../../../shared/types'
 
 export interface ChatMessage {
   id: string
@@ -121,9 +121,8 @@ export function useAgent() {
       case 'message_start': {
         if (event.message.role === 'assistant') {
           const id = `a-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`
-          // 记录 messageId -> 内部 id 的映射
-          const msgId = `msg-${event.message.timestamp}`
-          assistantMessageIds.current.set(msgId, id)
+          // 直接使用后端提供的 messageId
+          assistantMessageIds.current.set(event.messageId, id)
           setMessages((prev) => [...prev, { id, role: 'assistant', content: '' }])
         }
         break
@@ -154,10 +153,12 @@ export function useAgent() {
           const idx = prev.findIndex((m) => m.id === internalId)
           if (idx >= 0) {
             const updated = [...prev]
-            const text = event.message.content
-              .filter((c) => c.type === 'text')
-              .map((c) => c.text)
-              .join('')
+            const text = Array.isArray(event.message.content)
+              ? event.message.content
+                .filter((c: any) => c.type === 'text')
+                .map((c: any) => c.text)
+                .join('')
+              : event.message.content
             updated[idx] = { ...updated[idx], content: text || updated[idx].content }
             return updated
           }
@@ -199,13 +200,10 @@ export function useAgent() {
         break
       }
 
-      case 'agent_error': {
-        setError(event.message)
-        setIsLoading(false)
-        break
-      }
-
       case 'agent_end': {
+        if (event.status === 'error' && event.error) {
+          setError(event.error.message)
+        }
         setIsLoading(false)
         break
       }

@@ -33,7 +33,7 @@ describe('Agent Loop', () => {
         timestamp: Date.now(),
       }
 
-      options.onEvent({ type: 'message_start', message: assistantMsg })
+      options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
       for (const char of reply) {
         options.onEvent({ type: 'message_update', messageId: 'msg-1', delta: char })
       }
@@ -97,7 +97,7 @@ describe('Agent Loop', () => {
           stopReason: 'toolUse',
           timestamp: Date.now(),
         }
-        options.onEvent({ type: 'message_start', message: assistantMsg })
+        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
         options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
       } else {
         // 第二次调用：返回最终结果
@@ -107,7 +107,7 @@ describe('Agent Loop', () => {
           stopReason: 'stop',
           timestamp: Date.now(),
         }
-        options.onEvent({ type: 'message_start', message: assistantMsg })
+        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
         options.onEvent({ type: 'message_end', messageId: 'msg-2', message: assistantMsg })
       }
     })
@@ -190,7 +190,7 @@ describe('Agent Loop', () => {
         stopReason: 'toolUse',
         timestamp: Date.now(),
       }
-      options.onEvent({ type: 'message_start', message: assistantMsg })
+      options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
       options.onEvent({ type: 'message_end', messageId: 'msg-loop', message: assistantMsg })
     })
 
@@ -201,8 +201,9 @@ describe('Agent Loop', () => {
       (event) => events.push(event)
     )
 
-    const errorEvents = events.filter((e) => e.type === 'agent_error')
-    expect(errorEvents.length).toBeGreaterThan(0)
-    expect(errorEvents[0].code).toBe('MAX_TURNS_EXCEEDED')
+    const endEvents = events.filter((e) => e.type === 'agent_end')
+    expect(endEvents.length).toBeGreaterThan(0)
+    expect(endEvents[endEvents.length - 1].status).toBe('error')
+    expect(endEvents[endEvents.length - 1].error?.code).toBe('MAX_TURNS_EXCEEDED')
   })
 })

@@ -25,8 +25,9 @@ export async function runAgentLoop(
   // 添加用户消息到上下文
   for (const msg of userMessages) {
     context.messages.push(msg)
-    emit({ type: 'message_start', message: msg })
-    emit({ type: 'message_end', messageId: `msg-${msg.timestamp}`, message: msg })
+    const userMessageId = `msg-${msg.timestamp}`
+    emit({ type: 'message_start', messageId: userMessageId, message: msg })
+    emit({ type: 'message_end', messageId: userMessageId, message: msg })
   }
 
   let turnCount = 0
@@ -35,11 +36,12 @@ export async function runAgentLoop(
   while (turnCount < maxTurns) {
     if (signal?.aborted) {
       emit({
-        type: 'agent_error',
-        code: 'ABORTED',
-        message: '请求已中止',
+        type: 'agent_end',
+        status: 'aborted',
+        messages: context.messages,
+        error: { code: 'ABORTED', message: '请求已中止' },
       })
-      break
+      return newMessages
     }
     turnCount++
 
@@ -98,13 +100,15 @@ export async function runAgentLoop(
       lastMessageRole: context.messages.at(-1)?.role,
     })
     emit({
-      type: 'agent_error',
-      code: 'MAX_TURNS_EXCEEDED',
-      message: '已达到最大工具调用轮数（10 轮），请调整问题或缩小任务范围。',
+      type: 'agent_end',
+      status: 'error',
+      messages: context.messages,
+      error: { code: 'MAX_TURNS_EXCEEDED', message: '已达到最大工具调用轮数（10 轮），请调整问题或缩小任务范围。' },
     })
+    return newMessages
   }
 
-  emit({ type: 'agent_end', messages: context.messages })
+  emit({ type: 'agent_end', status: 'success', messages: context.messages })
   return newMessages
 }
 
@@ -138,11 +142,6 @@ async function callLLM(
       throw error // 重新抛出中止错误
     }
     console.error('[callLLM] LLM request failed:', error)
-    emit({
-      type: 'agent_error',
-      code: 'MODEL_ERROR',
-      message: `LLM 请求失败: ${error.message}`,
-    })
     throw error
   }
 
@@ -246,27 +245,39 @@ async function executeTool(
   }
 }
 
-// 工具参数运行时校验
+import { Value } from '@sinclair/typebox/value'
+import type { TSchema } from '@sinclair/typebox'
+
+// 工具参数运行时校验（优先使用 TypeBox Value，回退到手写校验）
 function validateToolArgs(tool: AgentTool, args: Record<string, any>): string | null {
   const schema = tool.parameters
   if (!schema || schema.type !== 'object') return null
 
+  // 尝试使用 TypeBox Value 校验（如果 schema 是 TypeBox 对象）
+  const kindSymbol = Symbol.for('TypeBox.Kind')
+  if ((schema as any)[kindSymbol]) {
+    const tschema = schema as unknown as TSchema
+    if (!Value.Check(tschema, args)) {
+      const errors = [...Value.Errors(tschema, args)]
+      return errors.map((e) => `${e.path}: ${e.message}`).join('; ')
+    }
+    return null
+  }
+
+  // 回退：手写基础校验（兼容纯 JSON Schema）
   const required = schema.required || []
   const properties = schema.properties || {}
 
-  // 检查必填字段
   for (const key of required) {
     if (args[key] === undefined || args[key] === null || args[key] === '') {
       return `缺少必填参数: ${key}`
     }
   }
 
-  // 检查类型和约束
   for (const [key, value] of Object.entries(args)) {
     const propSchema = properties[key]
     if (!propSchema) continue
 
-    // 类型检查
     if (propSchema.type === 'string' && typeof value !== 'string') {
       return `参数 ${key} 应为字符串，实际为 ${typeof value}`
     }
@@ -277,7 +288,6 @@ function validateToolArgs(tool: AgentTool, args: Record<string, any>): string | 
       return `参数 ${key} 应为布尔值，实际为 ${typeof value}`
     }
 
-    // 字符串长度检查
     if (propSchema.type === 'string' && typeof value === 'string') {
       if (propSchema.minLength !== undefined && value.length < propSchema.minLength) {
         return `参数 ${key} 长度应 >= ${propSchema.minLength}`
@@ -287,7 +297,6 @@ function validateToolArgs(tool: AgentTool, args: Record<string, any>): string | 
       }
     }
 
-    // 数字范围检查
     if (propSchema.type === 'number' && typeof value === 'number') {
       if (propSchema.minimum !== undefined && value < propSchema.minimum) {
         return `参数 ${key} 应 >= ${propSchema.minimum}`

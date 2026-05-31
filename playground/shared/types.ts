@@ -67,11 +67,10 @@ export interface ToolResult {
 
 export type AgentEvent =
   | { type: 'agent_start' }
-  | { type: 'agent_end'; messages: Message[] }
-  | { type: 'agent_error'; code: string; message: string }
+  | { type: 'agent_end'; status: 'success' | 'error' | 'aborted'; messages: Message[]; error?: { code: string; message: string } }
   | { type: 'turn_start' }
   | { type: 'turn_end'; message: Message; toolResults: ToolResultMessage[] }
-  | { type: 'message_start'; message: Message }
+  | { type: 'message_start'; messageId: string; message: Message }
   | { type: 'message_update'; messageId: string; delta: string }
   | { type: 'message_end'; messageId: string; message: Message }
   | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: any }

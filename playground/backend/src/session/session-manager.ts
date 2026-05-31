@@ -1,7 +1,8 @@
 import type { Message } from '../../../shared/types.js'
+import type { Agent } from '../core/agent.js'
 
-interface SessionData {
-  messages: Message[]
+interface SessionEntry {
+  agent: Agent
   createdAt: number
   lastAccessedAt: number
 }
@@ -13,7 +14,7 @@ interface SessionManagerOptions {
 }
 
 export class SessionManager {
-  private sessions = new Map<string, SessionData>()
+  private sessions = new Map<string, SessionEntry>()
   private options: Required<SessionManagerOptions>
 
   constructor(options: SessionManagerOptions = {}) {
@@ -27,17 +28,17 @@ export class SessionManager {
     this.startCleanupTimer()
   }
 
-  create(sessionId: string): void {
+  create(sessionId: string, agent: Agent): void {
     this.evictIfNeeded()
 
     this.sessions.set(sessionId, {
-      messages: [],
+      agent,
       createdAt: Date.now(),
       lastAccessedAt: Date.now(),
     })
   }
 
-  get(sessionId: string): SessionData | undefined {
+  get(sessionId: string): SessionEntry | undefined {
     const session = this.sessions.get(sessionId)
     if (session) {
       session.lastAccessedAt = Date.now()
@@ -45,43 +46,28 @@ export class SessionManager {
     return session
   }
 
+  getAgent(sessionId: string): Agent | undefined {
+    return this.get(sessionId)?.agent
+  }
+
   getMessages(sessionId: string): Message[] {
-    return this.get(sessionId)?.messages || []
-  }
-
-  setMessages(sessionId: string, messages: Message[]): void {
-    const session = this.sessions.get(sessionId)
-    if (session) {
-      // 限制消息数量
-      if (messages.length > this.options.maxMessages) {
-        messages = messages.slice(-this.options.maxMessages)
-      }
-      session.messages = messages
-      session.lastAccessedAt = Date.now()
-    }
-  }
-
-  appendMessage(sessionId: string, message: Message): void {
-    const session = this.sessions.get(sessionId)
-    if (session) {
-      session.messages.push(message)
-      // 限制消息数量
-      if (session.messages.length > this.options.maxMessages) {
-        session.messages = session.messages.slice(-this.options.maxMessages)
-      }
-      session.lastAccessedAt = Date.now()
-    }
+    return this.get(sessionId)?.agent.state.messages || []
   }
 
   clear(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (session) {
-      session.messages = []
+      session.agent.reset()
       session.lastAccessedAt = Date.now()
     }
   }
 
   delete(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (session) {
+      session.agent.abort?.()
+      session.agent.reset?.()
+    }
     this.sessions.delete(sessionId)
   }
 
@@ -92,7 +78,7 @@ export class SessionManager {
   getStats(): { totalSessions: number; totalMessages: number } {
     let totalMessages = 0
     for (const session of this.sessions.values()) {
-      totalMessages += session.messages.length
+      totalMessages += session.agent.state.messages.length
     }
     return {
       totalSessions: this.sessions.size,
@@ -115,7 +101,7 @@ export class SessionManager {
     }
 
     if (oldestId) {
-      this.sessions.delete(oldestId)
+      this.delete(oldestId)
     }
   }
 
@@ -130,7 +116,7 @@ export class SessionManager {
     }
 
     for (const id of expiredIds) {
-      this.sessions.delete(id)
+      this.delete(id)
     }
 
     if (expiredIds.length > 0) {
@@ -151,6 +137,9 @@ export class SessionManager {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
       this.cleanupTimer = null
+    }
+    for (const session of this.sessions.values()) {
+      session.agent.abort?.()
     }
     this.sessions.clear()
   }

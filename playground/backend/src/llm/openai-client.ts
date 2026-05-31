@@ -76,6 +76,7 @@ export async function openaiStream(
           currentContent = []
           options.onEvent({
             type: 'message_start',
+            messageId: currentMessageId,
             message: {
               role: 'assistant',
               content: [],

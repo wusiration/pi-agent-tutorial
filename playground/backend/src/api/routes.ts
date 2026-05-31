@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { Type } from '@sinclair/typebox'
 import type { Static } from '@sinclair/typebox'
+import { randomUUID } from 'node:crypto'
 import { Agent } from '../core/agent.js'
 import { weatherTool, calculatorTool, searchTool } from '../tools/index.js'
 import { SessionManager } from '../session/session-manager.js'
@@ -18,29 +19,31 @@ const ResetRequestSchema = Type.Object({
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 })
 
-// 会话管理器（带 TTL 和容量限制）
+// 会话管理器（统一持有 Agent，带 TTL 和容量限制）
 const sessionManager = new SessionManager({
   ttlMs: 24 * 60 * 60 * 1000,  // 24 小时过期
   maxSessions: 1000,            // 最多 1000 个会话
   maxMessages: 500,             // 单个会话最多 500 条消息
 })
 
-// Agent 实例缓存
-const agents = new Map<string, Agent>()
+function createAgent(): Agent {
+  return new Agent({
+    initialState: {
+      systemPrompt: 'You are a helpful assistant. You have access to weather, calculator, and search tools.',
+      messages: [],
+      tools: [weatherTool, calculatorTool, searchTool],
+    },
+  })
+}
 
 function getOrCreateAgent(sessionId: string): Agent {
-  if (!agents.has(sessionId)) {
-    const agent = new Agent({
-      initialState: {
-        systemPrompt: 'You are a helpful assistant. You have access to weather, calculator, and search tools.',
-        messages: [],
-        tools: [weatherTool, calculatorTool, searchTool],
-      },
-    })
-    agents.set(sessionId, agent)
-    sessionManager.create(sessionId)
+  let session = sessionManager.get(sessionId)
+  if (!session) {
+    const agent = createAgent()
+    sessionManager.create(sessionId, agent)
+    session = sessionManager.get(sessionId)
   }
-  return agents.get(sessionId)!
+  return session!.agent
 }
 
 export async function registerRoutes(app: FastifyInstance) {
@@ -64,7 +67,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   // 新建会话
   app.post('/api/sessions', async () => {
-    const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const sessionId = `sess-${randomUUID()}`
     getOrCreateAgent(sessionId)
     return { sessionId }
   })
@@ -77,11 +80,11 @@ export async function registerRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const body = request.body as Static<typeof ChatRequestSchema>
 
-    // 不再回退到 'default'，没有 sessionId 时自动创建新会话
-    let sessionId = body.sessionId
+    // 必须先创建 session
+    const sessionId = body.sessionId
     if (!sessionId) {
-      sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      getOrCreateAgent(sessionId)
+      reply.status(400)
+      return { error: 'sessionId is required. Call POST /api/sessions first.' }
     }
 
     const agent = getOrCreateAgent(sessionId)
@@ -104,7 +107,7 @@ export async function registerRoutes(app: FastifyInstance) {
     // 订阅事件并转发到 SSE
     unsubscribe = agent.subscribe((event) => {
       sse.send(event)
-      if (event.type === 'agent_end' || event.type === 'agent_error') {
+      if (event.type === 'agent_end') {
         sse.close()
         unsubscribe?.()
       }
@@ -117,9 +120,10 @@ export async function registerRoutes(app: FastifyInstance) {
       if (error.message !== 'Aborted' && error.name !== 'AbortError') {
         console.error('[API /chat] Agent error:', error)
         sse.send({
-          type: 'agent_error',
-          code: 'INTERNAL_ERROR',
-          message: error.message || '未知错误',
+          type: 'agent_end',
+          status: 'error',
+          messages: agent.state.messages,
+          error: { code: 'INTERNAL_ERROR', message: error.message || '未知错误' },
         })
       }
       sse.close()
@@ -139,10 +143,6 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!sessionId) {
       return { success: false, error: 'sessionId is required' }
     }
-    const agent = agents.get(sessionId)
-    if (agent) {
-      agent.reset()
-    }
     sessionManager.clear(sessionId)
     return { success: true }
   })
@@ -154,7 +154,7 @@ export async function registerRoutes(app: FastifyInstance) {
       reply.status(400)
       return { error: 'sessionId is required' }
     }
-    const agent = agents.get(sessionId)
+    const agent = sessionManager.getAgent(sessionId)
     if (!agent) {
       reply.status(404)
       return { error: 'Session not found' }
@@ -169,7 +169,7 @@ export async function registerRoutes(app: FastifyInstance) {
       reply.status(400)
       return { error: 'sessionId is required' }
     }
-    const agent = agents.get(sessionId)
+    const agent = sessionManager.getAgent(sessionId)
     if (!agent) {
       reply.status(404)
       return { error: 'Session not found' }
