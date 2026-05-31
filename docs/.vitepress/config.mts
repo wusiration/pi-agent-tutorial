@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: 'Pi Agent 原理与实现',
   description: '从零到一实现一个 AI Agent —— 基于 Pi 的渐进式教程',
   lang: 'zh-CN',
@@ -100,4 +101,8 @@ export default defineConfig({
       // 可在此注册自定义 markdown-it 插件
     },
   },
-})
+
+  mermaid: {
+    // Mermaid 配置选项
+  },
+}))
