@@ -17,6 +17,7 @@ export default withMermaid(defineConfig({
       { text: '教程', link: '/guide/01-why-agent' },
       { text: 'Demo', link: '/demos/01-hello-stream' },
       { text: '项目实现', link: '/project/01-overview' },
+      { text: '培训', link: '/training/' },
     ],
     sidebar: {
       '/guide/': [
@@ -71,6 +72,28 @@ export default withMermaid(defineConfig({
             { text: '06 前端：工具执行可视化', link: '/project/06-frontend-tools' },
             { text: '07 联调与运行', link: '/project/07-integration' },
             { text: '08 扩展方向', link: '/project/08-extensions' },
+            { text: '09 接入真实 LLM 提供商', link: '/project/09-real-llm-provider' },
+            { text: '10 生产环境检查清单', link: '/project/10-production-checklist' },
+          ],
+        },
+      ],
+      '/training/': [
+        {
+          text: '实操培训',
+          items: [
+            { text: '培训总览', link: '/training/' },
+            { text: '学习路线', link: '/roadmap' },
+            { text: '练习题', link: '/practice/' },
+            { text: '练习详解', link: '/practice/exercises' },
+          ],
+        },
+      ],
+      '/practice/': [
+        {
+          text: '练习',
+          items: [
+            { text: '练习题', link: '/practice/' },
+            { text: '练习详解', link: '/practice/exercises' },
           ],
         },
       ],
