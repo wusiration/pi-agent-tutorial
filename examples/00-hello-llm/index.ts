@@ -94,16 +94,20 @@ async function* realStream(): AsyncGenerator<string> {
   // The response body is a ReadableStream of server-sent events (SSE).
   const reader = response.body!.getReader();
   const decoder = new TextDecoder("utf-8");
+  let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
-    // Decode the raw bytes into a string.
-    const chunk = decoder.decode(value, { stream: true });
+    // Decode the raw bytes into a string, keeping incomplete multi-byte chars.
+    buffer += decoder.decode(value, { stream: true });
 
-    // Each SSE line looks like: data: {"choices":[{"delta":{"content":"hi"}}]}
-    for (const line of chunk.split("\n")) {
+    // Split into lines; the last element may be an incomplete line.
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed.startsWith("data:")) continue;
       const jsonStr = trimmed.slice(5).trim();
@@ -115,6 +119,25 @@ async function* realStream(): AsyncGenerator<string> {
         if (content) yield content;
       } catch {
         // Ignore malformed JSON lines (e.g. keep-alive pings)
+      }
+    }
+  }
+
+  // Flush any remaining bytes in the decoder.
+  buffer += decoder.decode();
+
+  if (buffer.trim()) {
+    const trimmed = buffer.trim();
+    if (trimmed.startsWith("data:")) {
+      const jsonStr = trimmed.slice(5).trim();
+      if (jsonStr !== "[DONE]") {
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) yield content;
+        } catch {
+          // Ignore malformed JSON lines
+        }
       }
     }
   }

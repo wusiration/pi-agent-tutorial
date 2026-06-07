@@ -149,6 +149,73 @@ const weatherTool: Tool = {
   },
 }
 
+function parseExpression(expr: string): number {
+  if (!/^[\d\s+\-*/().]+$/.test(expr)) {
+    throw new Error('Invalid characters')
+  }
+
+  const tokens = expr.match(/\d+|\+|\-|\*|\/|\(|\)/g)
+  if (!tokens) throw new Error('Invalid syntax')
+
+  let pos = 0
+
+  function peek(): string | undefined {
+    return tokens![pos]
+  }
+
+  function consume(): string {
+    return tokens![pos++]!
+  }
+
+  function parsePrimary(): number {
+    const token = peek()
+    if (token === '(') {
+      consume()
+      const value = parseAddSub()
+      if (peek() !== ')') throw new Error('Mismatched parentheses')
+      consume()
+      return value
+    }
+    if (token && /^\d+$/.test(token)) {
+      return Number(consume())
+    }
+    throw new Error('Invalid syntax')
+  }
+
+  function parseMulDiv(): number {
+    let left = parsePrimary()
+    while (peek() === '*' || peek() === '/') {
+      const op = consume()
+      const right = parsePrimary()
+      if (op === '*') {
+        left = left * right
+      } else {
+        if (right === 0) throw new Error('Division by zero')
+        left = left / right
+      }
+    }
+    return left
+  }
+
+  function parseAddSub(): number {
+    let left = parseMulDiv()
+    while (peek() === '+' || peek() === '-') {
+      const op = consume()
+      const right = parseMulDiv()
+      if (op === '+') {
+        left = left + right
+      } else {
+        left = left - right
+      }
+    }
+    return left
+  }
+
+  const result = parseAddSub()
+  if (pos !== tokens.length) throw new Error('Invalid syntax')
+  return result
+}
+
 const calculatorTool: Tool = {
   name: 'calculator',
   description: '计算简单的数学表达式（支持 + - * /）',
@@ -158,12 +225,10 @@ const calculatorTool: Tool = {
   execute: async (_id, params) => {
     const expr = String(params.expression ?? '')
     try {
-      if (!/^[\d\s+\-*/().]+$/.test(expr)) throw new Error('Invalid characters')
-      // eslint-disable-next-line no-eval
-      const result = eval(expr)
+      const result = parseExpression(expr)
       return { content: [{ type: 'text', text: `${expr} = ${result}` }] }
-    } catch {
-      return { content: [{ type: 'text', text: `无法计算：${expr}` }] }
+    } catch (err: any) {
+      return { content: [{ type: 'text', text: `无法计算：${expr}（${err.message}）` }] }
     }
   },
 }
@@ -277,11 +342,22 @@ function printHistory(session: Session): void {
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => {
+    if (signal?.aborted) {
+      reject(new Error('Aborted'))
+      return
+    }
+
+    const onAbort = () => {
       clearTimeout(timer)
       reject(new Error('Aborted'))
-    })
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -293,6 +369,7 @@ async function main(): Promise<void> {
   const session = createSession()
   let abortCtrl: AbortController | null = null
   let inFlight = false
+  let activeTask: Promise<void> | null = null
 
   const rl = createInterface({ input, output, prompt: '> ' })
 
@@ -318,12 +395,12 @@ async function main(): Promise<void> {
     }
 
     if (raw === '/abort') {
-      if (inFlight) {
-        abortCtrl!.abort()
-        output.write('⏹️  Request aborted.\n\n')
-      } else {
+      if (!inFlight) {
         output.write('ℹ️  No request in flight.\n\n')
+        continue
       }
+      abortCtrl!.abort()
+      output.write('⏹️  Request aborted.\n\n')
       continue
     }
 
@@ -336,18 +413,24 @@ async function main(): Promise<void> {
       continue
     }
 
+    if (inFlight) {
+      output.write('⚠️  当前有任务运行中，请先输入 /abort\n\n')
+      continue
+    }
+
     // Normal message — run an Agent turn with cancellation support.
     abortCtrl = new AbortController()
     inFlight = true
-    try {
-      await runAgentTurn(raw, session, abortCtrl.signal)
-      output.write('\n')
-    } catch (err: any) {
-      output.write(err.message === 'Aborted' ? '⏹️  Turn was aborted.\n\n' : `❌ Error: ${err.message}\n\n`)
-    } finally {
-      inFlight = false
-      abortCtrl = null
-    }
+    activeTask = runAgentTurn(raw, session, abortCtrl.signal)
+      .then(() => { output.write('\n') })
+      .catch((err: any) => {
+        output.write(err.message === 'Aborted' ? '⏹️  Turn was aborted.\n\n' : `❌ Error: ${err.message}\n\n`)
+      })
+      .finally(() => {
+        inFlight = false
+        abortCtrl = null
+        activeTask = null
+      })
   }
 
   output.write('\n')

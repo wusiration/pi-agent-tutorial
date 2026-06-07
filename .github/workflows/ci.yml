@@ -15,6 +15,9 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -56,11 +59,18 @@ jobs:
 
       - name: Example smoke tests
         run: |
+          set -e
           cd examples/01-manual-loop
-          timeout 10s npm run start || true
+          timeout 10s npm run start
           cd -
           cd examples/06-mini-agent-cli
-          timeout 5s npm run start || true
+          set +e
+          timeout 5s npm run start
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ]; then
+            exit "$STATUS"
+          fi
 
   build-docs:
     runs-on: ubuntu-latest
