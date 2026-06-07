@@ -255,10 +255,11 @@ function resetSession(s: Session): void {
 // Streaming Output (typing effect)
 // ============================================
 
-async function streamText(text: string, chunkMs = 30): Promise<void> {
+async function streamText(text: string, chunkMs = 30, signal?: AbortSignal): Promise<void> {
   for (const char of text) {
+    if (signal?.aborted) throw new Error('Aborted')
     output.write(char)
-    await delay(chunkMs)
+    await delay(chunkMs, signal)
   }
   output.write('\n')
 }
@@ -278,7 +279,7 @@ async function runAgentTurn(input: string, session: Session, signal: AbortSignal
   // 3. Stream text portions to terminal.
   for (const part of assistant.content.filter((c): c is TextContent => c.type === 'text')) {
     output.write('🤖 ')
-    await streamText(part.text)
+    await streamText(part.text, 30, signal)
   }
 
   // 4. Execute any tool calls.
@@ -314,7 +315,7 @@ async function runAgentTurn(input: string, session: Session, signal: AbortSignal
 
   for (const part of followUp.content.filter((c): c is TextContent => c.type === 'text')) {
     output.write('🤖 ')
-    await streamText(part.text)
+    await streamText(part.text, 30, signal)
   }
 }
 
@@ -389,6 +390,10 @@ async function main(): Promise<void> {
     }
 
     if (raw === '/reset') {
+      if (inFlight) {
+        output.write('⚠️  当前有任务运行中，请先输入 /abort\n\n')
+        continue
+      }
       resetSession(session)
       output.write('🗑️  Session cleared.\n\n')
       continue

@@ -15,7 +15,8 @@
     "build:backend": "cd playground/backend && npm run build",
     "build:frontend": "cd playground/frontend && npm run build",
     "build:all": "npm run build:backend && npm run build:frontend && npm run docs:build",
-    "test": "npm run test:backend"
+    "test": "npm run test:backend",
+    "setup": "bash scripts/setup.sh"
   },
   "keywords": ["ai", "agent", "llm", "tutorial", "openai"],
   "author": "",
