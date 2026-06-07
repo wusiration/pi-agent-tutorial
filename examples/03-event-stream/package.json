@@ -1,0 +1,16 @@
+{
+  "name": "03-event-stream",
+  "version": "1.0.0",
+  "description": "Event-driven architecture example: Agent emits events, multiple subscribers listen.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

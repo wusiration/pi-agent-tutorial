@@ -1,0 +1,14 @@
+{
+  "name": "example-session-context",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.0"
+  }
+}

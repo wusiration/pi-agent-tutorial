@@ -1,6 +1,6 @@
 # 渐进式 Demo
 
-> 不要一开始就写大项目。这 5 个 Demo 带你从最简单的流式输出，逐步掌握 Agent 的核心机制。
+> 不要一开始就写大项目。这 7 个 Demo 带你从最简单的 LLM 流式输出，逐步掌握 Agent 的核心机制。
 >
 > **Demo 和项目的关系**：Demo 是"零件"，项目是"整车"。每个 Demo 聚焦一个机制，项目篇把它们组装成完整应用。
 
@@ -9,10 +9,12 @@
 ```mermaid
 graph LR
     subgraph "Demo 篇（学零件）"
-        D1[Demo 1<br/>Hello Stream] --> D2[Demo 2<br/>手动 Agent Loop]
+        D0[Demo 0<br/>Hello LLM] --> D1[Demo 1<br/>Hello Stream]
+        D1 --> D2[Demo 2<br/>手动 Agent Loop]
         D2 --> D3[Demo 3<br/>工具调用]
         D3 --> D4[Demo 4<br/>事件 UI]
         D4 --> D5[Demo 5<br/>Steering 队列]
+        D5 --> D6[Demo 6<br/>Mini Agent CLI]
     end
 
     subgraph "项目篇（组装车）"
@@ -30,25 +32,27 @@ graph LR
 
 | Demo | 学到的机制 | 在项目篇哪里用到 |
 |------|-----------|---------------|
-| **Demo 1** `streamSimple` | 流式 LLM 输出 | `backend/src/llm/openai-client.ts` |
+| **Demo 0** `hello-llm` | 原始 LLM 流式输出 | `backend/src/llm/openai-client.ts` |
+| **Demo 1** `streamSimple` | 框架级流式输出 | `backend/src/llm/openai-client.ts` |
 | **Demo 2** `agentLoop` | 状态管理、自动循环 | `backend/src/core/agent-loop.ts` |
 | **Demo 3** 工具调用 | Schema、并行执行、错误恢复 | `backend/src/tools/*.ts` |
 | **Demo 4** 事件订阅 | 事件驱动 UI 更新 | `frontend/src/hooks/useAgent.ts` |
 | **Demo 5** Steering | 运行时中断、人机协作 | `backend/src/core/agent.ts` (AbortController) |
+| **Demo 6** Mini Agent CLI | 全功能整合、交互式 CLI | `playground/` 完整项目 |
 
 ## 学习建议
 
 ### 路径一：先跑 Demo，再读项目（推荐）
 
 ```
-Demo 1 → Demo 2 → Demo 3 → Demo 4 → Demo 5
-    ↓         ↓         ↓         ↓         ↓
-  理解流式   理解循环    理解工具    理解事件    理解中断
-    ↓         ↓         ↓         ↓         ↓
-    └─────────┴─────────┴─────────┴─────────┘
-                      ↓
-              项目篇 03-06
-              "原来这些代码是这么来的"
+Demo 0 → Demo 1 → Demo 2 → Demo 3 → Demo 4 → Demo 5 → Demo 6
+    ↓        ↓         ↓         ↓         ↓         ↓         ↓
+  原始流式  框架流式   理解循环   理解工具   理解事件   理解中断   完整整合
+    ↓        ↓         ↓         ↓         ↓         ↓         ↓
+    └────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
+                              ↓
+                      项目篇 03-07
+                      "原来这些代码是这么来的"
 ```
 
 **适合**：时间充裕、喜欢循序渐进的学习者。
@@ -77,11 +81,13 @@ Demo 1 → Demo 2 → Demo 3 → Demo 4 → Demo 5
 
 | Demo | 主题 | 掌握的能力 | 是否需要 API Key |
 |------|------|-----------|-----------------|
-| [Demo 1](01-hello-stream) | Hello Stream | 流式 LLM 输出 | ✅ 需要（或 Mock） |
+| Demo 0 `00-hello-llm` | Hello LLM | 原始流式输出、Mock 模式 | ❌ 不需要 |
+| [Demo 1](01-hello-stream) | Hello Stream | 框架级流式 LLM 输出 | ✅ 需要（或 Mock） |
 | [Demo 2](02-manual-loop) | 手动 Agent Loop | 状态管理、工具调用、自动循环 | ✅ 需要（或 Mock） |
 | [Demo 3](03-tool-calls) | 工具调用与执行 | 多工具、并行执行、错误自纠正 | ✅ 需要（或 Mock） |
 | [Demo 4](04-event-ui) | 事件订阅与 UI | 事件驱动、终端聊天界面 | ✅ 需要（或 Mock） |
 | [Demo 5](05-steering-queue) | Steering 与队列 | 运行时插入指令、人机协作 | ✅ 需要（或 Mock） |
+| Demo 6 `06-mini-agent-cli` | Mini Agent CLI | 全功能整合、交互式命令行 | ❌ 不需要 |
 
 ## 运行方式
 

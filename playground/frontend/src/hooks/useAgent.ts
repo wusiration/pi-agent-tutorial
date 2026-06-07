@@ -4,7 +4,11 @@ import type { AgentEvent } from '../../../shared/types'
 async function ensureOk(response: Response): Promise<Response> {
   if (response.ok) return response
   const body = await response.json().catch(() => null)
-  throw new Error(body?.error || body?.message || `HTTP ${response.status}`)
+  let message = body?.error || body?.message || `HTTP ${response.status}`
+  if (response.status === 409) {
+    message = body?.error || body?.message || 'Agent 正忙，请稍后再试'
+  }
+  throw new Error(message)
 }
 
 export interface ChatMessage {
@@ -142,6 +146,7 @@ export function useAgent() {
           ...prev,
           { id: `err-${Date.now()}`, role: 'assistant', content: `Error: ${error.message}`, isError: true },
         ])
+        throw error
       }
     } finally {
       setIsLoading(false)
@@ -276,11 +281,14 @@ export function useAgent() {
     URL.revokeObjectURL(url)
   }, [sessionId])
 
+  const turnCount = Math.floor(messages.filter((m) => m.role === 'user').length)
+
   return {
     messages,
     isLoading,
     error,
     sessionId,
+    turnCount,
     createSession,
     loadHistory,
     sendMessage,

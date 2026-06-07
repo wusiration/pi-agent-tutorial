@@ -1,7 +1,5 @@
 import type { Message, ToolResultMessage, AgentEvent, AssistantMessage, ToolCallContent, Content } from '../../../shared/types.js'
 import type { AgentContext, AgentTool, LoopConfig } from './types.js'
-import { mockStream } from '../llm/mock-client.js'
-import { openaiStream } from '../llm/openai-client.js'
 
 function isToolCallContent(c: Content): c is ToolCallContent {
   return c.type === 'toolCall'
@@ -205,12 +203,13 @@ async function callLLM(
     }
   }
 
+  const provider = config.provider
+  if (!provider) {
+    throw new Error('No LLM provider configured')
+  }
+
   try {
-    if (config.useMock) {
-      await mockStream(context.messages, context.tools, { onEvent }, signal)
-    } else {
-      await openaiStream(context.messages, context.tools, { onEvent }, signal)
-    }
+    await provider.stream(context.messages, context.tools, { onEvent }, signal)
   } catch (error: any) {
     if (error.message === 'Aborted' || error.name === 'AbortError') {
       throw error // 重新抛出中止错误

@@ -2,17 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { runAgentLoop } from './agent-loop.js'
 import type { AgentContext } from './types.js'
 import type { Message, AssistantMessage } from '../../../shared/types.js'
-
-// Mock LLM 客户端
-vi.mock('../llm/mock-client.js', () => ({
-  mockStream: vi.fn(),
-}))
-
-vi.mock('../llm/openai-client.js', () => ({
-  openaiStream: vi.fn(),
-}))
-
-import { mockStream } from '../llm/mock-client.js'
+import type { LLMProvider } from '../llm/provider.js'
 
 describe('Agent Loop', () => {
   it('should emit correct event sequence for simple text response', async () => {
@@ -23,27 +13,28 @@ describe('Agent Loop', () => {
       tools: [],
     }
 
-    // Mock LLM 返回简单文本
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      const reply = 'Hello!'
-      const assistantMsg: AssistantMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: reply }],
-        stopReason: 'stop',
-        timestamp: Date.now(),
-      }
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        const reply = 'Hello!'
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [{ type: 'text', text: reply }],
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        }
 
-      options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
-      for (const char of reply) {
-        options.onEvent({ type: 'message_update', messageId: 'msg-1', delta: char })
+        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
+        for (const char of reply) {
+          options.onEvent({ type: 'message_update', messageId: 'msg-1', delta: char })
+        }
+        options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
       }
-      options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Hi', timestamp: Date.now() }],
       context,
-      { useMock: true },
+      { provider: mockProvider },
       (event) => events.push(event)
     )
 
@@ -83,39 +74,41 @@ describe('Agent Loop', () => {
     }
 
     let callCount = 0
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      callCount++
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        callCount++
 
-      if (callCount === 1) {
-        // 第一次调用：返回 toolCall
-        const assistantMsg: AssistantMessage = {
-          role: 'assistant',
-          content: [
-            { type: 'text', text: 'Using tool' },
-            { type: 'toolCall', id: 'call-1', name: 'test_tool', arguments: {} },
-          ],
-          stopReason: 'toolUse',
-          timestamp: Date.now(),
+        if (callCount === 1) {
+          // 第一次调用：返回 toolCall
+          const assistantMsg: AssistantMessage = {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'Using tool' },
+              { type: 'toolCall', id: 'call-1', name: 'test_tool', arguments: {} },
+            ],
+            stopReason: 'toolUse',
+            timestamp: Date.now(),
+          }
+          options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
+          options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
+        } else {
+          // 第二次调用：返回最终结果
+          const assistantMsg: AssistantMessage = {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Done!' }],
+            stopReason: 'stop',
+            timestamp: Date.now(),
+          }
+          options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
+          options.onEvent({ type: 'message_end', messageId: 'msg-2', message: assistantMsg })
         }
-        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
-        options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
-      } else {
-        // 第二次调用：返回最终结果
-        const assistantMsg: AssistantMessage = {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Done!' }],
-          stopReason: 'stop',
-          timestamp: Date.now(),
-        }
-        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
-        options.onEvent({ type: 'message_end', messageId: 'msg-2', message: assistantMsg })
       }
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Use tool', timestamp: Date.now() }],
       context,
-      { useMock: true },
+      { provider: mockProvider },
       (event) => events.push(event)
     )
 
@@ -141,16 +134,18 @@ describe('Agent Loop', () => {
       tools: [],
     }
 
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options, signal) => {
-      // 模拟长时间运行的 LLM 调用
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 200)
-        signal?.addEventListener('abort', () => {
-          clearTimeout(timer)
-          reject(new Error('Aborted'))
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options, signal) {
+        // 模拟长时间运行的 LLM 调用
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 200)
+          signal?.addEventListener('abort', () => {
+            clearTimeout(timer)
+            reject(new Error('Aborted'))
+          })
         })
-      })
-    })
+      }
+    }
 
     // 50ms 后取消
     setTimeout(() => controller.abort(), 50)
@@ -158,7 +153,7 @@ describe('Agent Loop', () => {
     await expect(runAgentLoop(
       [{ role: 'user', content: 'Hi', timestamp: Date.now() }],
       context,
-      { useMock: true },
+      { provider: mockProvider },
       (event) => events.push(event),
       controller.signal
     )).rejects.toThrow('Aborted')
@@ -180,24 +175,25 @@ describe('Agent Loop', () => {
       }],
     }
 
-    // Mock 永远返回 toolCall，模拟无限循环
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      const assistantMsg: AssistantMessage = {
-        role: 'assistant',
-        content: [
-          { type: 'toolCall', id: 'call-loop', name: 'loop_tool', arguments: {} },
-        ],
-        stopReason: 'toolUse',
-        timestamp: Date.now(),
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'call-loop', name: 'loop_tool', arguments: {} },
+          ],
+          stopReason: 'toolUse',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: 'msg-loop', message: assistantMsg })
       }
-      options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
-      options.onEvent({ type: 'message_end', messageId: 'msg-loop', message: assistantMsg })
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Loop forever', timestamp: Date.now() }],
       context,
-      { useMock: true },
+      { provider: mockProvider },
       (event) => events.push(event)
     )
 
@@ -224,38 +220,40 @@ describe('Agent Loop', () => {
     }
 
     let callCount = 0
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      callCount++
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        callCount++
 
-      if (callCount <= 9) {
-        // 前 9 次返回 toolCall
-        const assistantMsg: AssistantMessage = {
-          role: 'assistant',
-          content: [
-            { type: 'toolCall', id: `call-${callCount}`, name: 'test_tool', arguments: {} },
-          ],
-          stopReason: 'toolUse',
-          timestamp: Date.now(),
+        if (callCount <= 9) {
+          // 前 9 次返回 toolCall
+          const assistantMsg: AssistantMessage = {
+            role: 'assistant',
+            content: [
+              { type: 'toolCall', id: `call-${callCount}`, name: 'test_tool', arguments: {} },
+            ],
+            stopReason: 'toolUse',
+            timestamp: Date.now(),
+          }
+          options.onEvent({ type: 'message_start', messageId: `msg-${callCount}`, message: assistantMsg })
+          options.onEvent({ type: 'message_end', messageId: `msg-${callCount}`, message: assistantMsg })
+        } else {
+          // 第 10 次返回普通文本（正常完成）
+          const assistantMsg: AssistantMessage = {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Final answer' }],
+            stopReason: 'stop',
+            timestamp: Date.now(),
+          }
+          options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
+          options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
         }
-        options.onEvent({ type: 'message_start', messageId: `msg-${callCount}`, message: assistantMsg })
-        options.onEvent({ type: 'message_end', messageId: `msg-${callCount}`, message: assistantMsg })
-      } else {
-        // 第 10 次返回普通文本（正常完成）
-        const assistantMsg: AssistantMessage = {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Final answer' }],
-          stopReason: 'stop',
-          timestamp: Date.now(),
-        }
-        options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
-        options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
       }
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Test max turns boundary', timestamp: Date.now() }],
       context,
-      { useMock: true },
+      { provider: mockProvider },
       (event) => events.push(event)
     )
 
@@ -273,21 +271,23 @@ describe('Agent Loop', () => {
       tools: [],
     }
 
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      const assistantMsg: AssistantMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Reply' }],
-        stopReason: 'stop',
-        timestamp: Date.now(),
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Reply' }],
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
       }
-      options.onEvent({ type: 'message_start', messageId: 'msg-1', message: assistantMsg })
-      options.onEvent({ type: 'message_end', messageId: 'msg-1', message: assistantMsg })
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Hi', timestamp: Date.now() }],
       context,
-      { useMock: true, maxMessages: 4 },
+      { provider: mockProvider, maxMessages: 4 },
       (event) => events.push(event)
     )
 
@@ -312,25 +312,27 @@ describe('Agent Loop', () => {
     }
 
     let callCount = 0
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      callCount++
-      const assistantMsg: AssistantMessage = {
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'Using tool' },
-          { type: 'toolCall', id: 'call-1', name: 'test_tool', arguments: {} },
-        ],
-        stopReason: 'toolUse',
-        timestamp: Date.now(),
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        callCount++
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Using tool' },
+            { type: 'toolCall', id: 'call-1', name: 'test_tool', arguments: {} },
+          ],
+          stopReason: 'toolUse',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: `msg-${callCount}`, message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: `msg-${callCount}`, message: assistantMsg })
       }
-      options.onEvent({ type: 'message_start', messageId: `msg-${callCount}`, message: assistantMsg })
-      options.onEvent({ type: 'message_end', messageId: `msg-${callCount}`, message: assistantMsg })
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Use tool', timestamp: Date.now() }],
       context,
-      { useMock: true, maxMessages: 3, toolExecution: 'parallel' },
+      { provider: mockProvider, maxMessages: 3, toolExecution: 'parallel' },
       (event) => events.push(event)
     )
 
@@ -354,21 +356,23 @@ describe('Agent Loop', () => {
       context.messages.push({ role: 'assistant', content: [{ type: 'text', text: `A${i}` }], stopReason: 'stop', timestamp: Date.now() })
     }
 
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      const assistantMsg: AssistantMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Final' }],
-        stopReason: 'stop',
-        timestamp: Date.now(),
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Final' }],
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
       }
-      options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
-      options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Hi', timestamp: Date.now() }],
       context,
-      { useMock: true, maxMessages: 4 },
+      { provider: mockProvider, maxMessages: 4 },
       (event) => events.push(event)
     )
 
@@ -417,21 +421,23 @@ describe('Agent Loop', () => {
     }
 
     // 第 3 轮：assistant 给出最终回答（普通文本）
-    vi.mocked(mockStream).mockImplementation(async (messages, tools, options) => {
-      const assistantMsg: AssistantMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Final answer' }],
-        stopReason: 'stop',
-        timestamp: Date.now(),
+    const mockProvider: LLMProvider = {
+      async stream(messages, tools, options) {
+        const assistantMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Final answer' }],
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        }
+        options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
+        options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
       }
-      options.onEvent({ type: 'message_start', messageId: 'msg-final', message: assistantMsg })
-      options.onEvent({ type: 'message_end', messageId: 'msg-final', message: assistantMsg })
-    })
+    }
 
     await runAgentLoop(
       [{ role: 'user', content: 'Final question', timestamp: Date.now() }],
       context,
-      { useMock: true, maxMessages: 5, toolExecution: 'parallel' },
+      { provider: mockProvider, maxMessages: 5, toolExecution: 'parallel' },
       (event) => events.push(event)
     )
 

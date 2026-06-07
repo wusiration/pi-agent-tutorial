@@ -1,7 +1,7 @@
 {
   "name": "pi-agent-tutorial",
   "version": "1.0.0",
-  "description": "",
+  "description": "π Agent 教程：从零开始构建 AI Agent",
   "main": "index.js",
   "directories": {
     "doc": "docs"
@@ -10,9 +10,14 @@
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck:examples": "bash scripts/typecheck-all.sh",
+    "test:backend": "cd playground/backend && npm test -- --run",
+    "build:backend": "cd playground/backend && npm run build",
+    "build:frontend": "cd playground/frontend && npm run build",
+    "build:all": "npm run build:backend && npm run build:frontend && npm run docs:build",
+    "test": "npm run test:backend"
   },
-  "keywords": [],
+  "keywords": ["ai", "agent", "llm", "tutorial", "openai"],
   "author": "",
   "license": "MIT",
   "type": "module",
@@ -21,7 +26,9 @@
     "vue": "^3.5.35"
   },
   "devDependencies": {
+    "@terrastruct/d2": "^0.1.33",
     "mermaid": "^11.15.0",
+    "vitepress-plugin-d2": "^1.1.0",
     "vitepress-plugin-mermaid": "^2.0.17"
   }
 }

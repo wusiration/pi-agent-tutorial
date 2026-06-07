@@ -1,6 +1,9 @@
 import type { Message, AgentEvent } from '../../../shared/types.js'
-import type { AgentContext, AgentState, AgentOptions, AgentEventListener } from './types.js'
+import type { AgentContext, AgentState, AgentOptions, AgentEventListener, LoopConfig } from './types.js'
 import { runAgentLoop } from './agent-loop.js'
+import { MockProvider } from '../llm/mock-provider.js'
+import { OpenAIProvider } from '../llm/openai-provider.js'
+import type { LLMProvider } from '../llm/provider.js'
 
 function mergeAbortSignals(internalSignal: AbortSignal, externalSignal?: AbortSignal): AbortSignal {
   if (!externalSignal) return internalSignal
@@ -22,6 +25,7 @@ export class Agent {
   private _isStreaming = false
   private abortController: AbortController | null = null
   private maxMessages: number | undefined
+  private provider: LLMProvider
 
   constructor(options: AgentOptions) {
     this.context = {
@@ -30,6 +34,7 @@ export class Agent {
       tools: options.initialState.tools || [],
     }
     this.maxMessages = options.maxMessages
+    this.provider = options.provider || new OpenAIProvider()
   }
 
   get state(): AgentState {
@@ -80,11 +85,18 @@ export class Agent {
         ? { role: 'user', content: message, timestamp: Date.now() }
         : message
 
+    const provider = options?.useMock ? new MockProvider() : this.provider
+
     try {
+      const config: LoopConfig = {
+        provider,
+        toolExecution: 'parallel',
+        maxMessages: this.maxMessages,
+      }
       await runAgentLoop(
         [userMsg],
         this.context,
-        { useMock: options?.useMock, toolExecution: 'parallel', maxMessages: this.maxMessages },
+        config,
         (event) => this.emit(event),
         signal
       )
@@ -102,6 +114,10 @@ export class Agent {
 
   setAbortController(controller: AbortController | null): void {
     this.abortController = controller
+  }
+
+  setMessages(messages: Message[]): void {
+    this.context.messages = messages
   }
 
   reset() {

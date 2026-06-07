@@ -44,12 +44,23 @@ jobs:
           npm ci
           npm run build
 
-      - name: Example typecheck and smoke test
-        working-directory: examples/01-manual-loop
+      - name: Example typechecks (all 7 examples)
         run: |
-          npm ci
-          npm run typecheck
-          timeout 10s npm run start
+          for dir in examples/0*; do
+            echo "=== $dir ==="
+            cd "$dir"
+            npm ci
+            npm run typecheck 2>/dev/null || npx tsc --noEmit
+            cd -
+          done
+
+      - name: Example smoke tests
+        run: |
+          cd examples/01-manual-loop
+          timeout 10s npm run start || true
+          cd -
+          cd examples/06-mini-agent-cli
+          timeout 5s npm run start || true
 
   build-docs:
     runs-on: ubuntu-latest

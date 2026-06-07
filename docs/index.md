@@ -25,7 +25,7 @@ features:
     details: 从核心概念出发，理解 Agent 为什么需要状态、事件、工具与循环，而不是简单地把 LLM 包一层。
   - icon: 🛠️
     title: 渐进式 Demo
-    details: 5 个由浅入深的独立 Demo，从流式输出到 Steering 队列，每一步都可运行、可验证。
+    details: 7 个由浅入深的独立 Demo，从原始 LLM 流式输出到完整 Mini Agent CLI，每一步都可运行、可验证。
   - icon: 🚀
     title: 完整项目
     details: 手把手带你实现一个教学版 Pi Agent：React 前端 + Node.js 后端，保留核心思想，去除生产噪音。

@@ -7,6 +7,7 @@ import { weatherTool, calculatorTool, searchTool } from '../tools/index.js'
 import { SessionManager } from '../session/session-manager.js'
 import { SSEConnection } from './sse.js'
 import type { ChatRequest } from '../../../shared/types.js'
+import { OpenAIProvider } from '../llm/openai-provider.js'
 
 // 请求体验证 Schema
 const ChatRequestSchema = Type.Object({
@@ -19,12 +20,19 @@ const ResetRequestSchema = Type.Object({
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 })
 
+const ImportRequestSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1, maxLength: 128 }),
+  messages: Type.Array(Type.Any()),
+})
+
 // 会话管理器（统一持有 Agent，带 TTL 和容量限制）
 const sessionManager = new SessionManager({
   ttlMs: 24 * 60 * 60 * 1000,  // 24 小时过期
   maxSessions: 1000,            // 最多 1000 个会话
   maxMessages: 500,             // 单个会话最多 500 条消息
 })
+
+const defaultProvider = new OpenAIProvider()
 
 function createAgent(): Agent {
   return new Agent({
@@ -34,6 +42,7 @@ function createAgent(): Agent {
       tools: [weatherTool, calculatorTool, searchTool],
     },
     maxMessages: sessionManager.getMaxMessages(),
+    provider: defaultProvider,
   })
 }
 
@@ -49,7 +58,20 @@ function getOrCreateAgent(sessionId: string): Agent {
 
 export async function registerRoutes(app: FastifyInstance) {
   // 健康检查
-  app.get('/api/health', async () => ({ status: 'ok', timestamp: Date.now() }))
+  app.get('/api/health', async () => {
+    const mem = process.memoryUsage()
+    return {
+      status: 'ok',
+      timestamp: Date.now(),
+      uptime: process.uptime(),
+      memory: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+      },
+      activeSessions: sessionManager.getStats().totalSessions,
+    }
+  })
 
   // 获取可用工具列表
   app.get('/api/tools', async () => {
@@ -85,7 +107,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const sessionId = body.sessionId
     if (!sessionId) {
       reply.status(400)
-      return { error: 'sessionId is required. Call POST /api/sessions first.' }
+      return { error: 'sessionId is required. Call POST /api/sessions first.', code: 'VALIDATION_ERROR' }
     }
 
     const agent = sessionManager.getAgent(sessionId)
@@ -97,7 +119,7 @@ export async function registerRoutes(app: FastifyInstance) {
     // 并发检查：如果 Agent 正在处理请求，返回 409
     if (agent.state.isStreaming) {
       reply.status(409)
-      return { error: 'Agent is already streaming', code: 'CONFLICT' }
+      return { error: 'Agent is already streaming', code: 'AGENT_BUSY' }
     }
 
     const sse = new SSEConnection(reply)
@@ -154,18 +176,18 @@ export async function registerRoutes(app: FastifyInstance) {
     const sessionId = body.sessionId
     if (!sessionId) {
       reply.status(400)
-      return { success: false, error: 'sessionId is required' }
+      return { error: 'sessionId is required', code: 'VALIDATION_ERROR' }
     }
 
     const agent = sessionManager.getAgent(sessionId)
     if (!agent) {
       reply.status(404)
-      return { success: false, code: 'SESSION_NOT_FOUND', error: 'Session not found' }
+      return { error: 'Session not found', code: 'SESSION_NOT_FOUND' }
     }
 
     if (agent.state.isStreaming) {
       reply.status(409)
-      return { success: false, code: 'AGENT_BUSY', error: 'Cannot reset while agent is streaming' }
+      return { error: 'Cannot reset while agent is streaming', code: 'AGENT_BUSY' }
     }
 
     sessionManager.clear(sessionId)
@@ -177,12 +199,12 @@ export async function registerRoutes(app: FastifyInstance) {
     const { sessionId } = request.query as { sessionId?: string }
     if (!sessionId) {
       reply.status(400)
-      return { error: 'sessionId is required' }
+      return { error: 'sessionId is required', code: 'VALIDATION_ERROR' }
     }
     const agent = sessionManager.getAgent(sessionId)
     if (!agent) {
       reply.status(404)
-      return { error: 'Session not found' }
+      return { error: 'Session not found', code: 'SESSION_NOT_FOUND' }
     }
     return { messages: agent.state.messages || [] }
   })
@@ -192,12 +214,12 @@ export async function registerRoutes(app: FastifyInstance) {
     const { sessionId } = request.query as { sessionId?: string }
     if (!sessionId) {
       reply.status(400)
-      return { error: 'sessionId is required' }
+      return { error: 'sessionId is required', code: 'VALIDATION_ERROR' }
     }
     const agent = sessionManager.getAgent(sessionId)
     if (!agent) {
       reply.status(404)
-      return { error: 'Session not found' }
+      return { error: 'Session not found', code: 'SESSION_NOT_FOUND' }
     }
 
     reply.header('Content-Type', 'application/json')
@@ -205,7 +227,41 @@ export async function registerRoutes(app: FastifyInstance) {
     return {
       messages: agent.state.messages,
       exportedAt: new Date().toISOString(),
+      version: '1.0',
     }
+  })
+
+  // 导入会话
+  app.post('/api/import', {
+    schema: {
+      body: ImportRequestSchema,
+    },
+  }, async (request, reply) => {
+    const body = request.body as Static<typeof ImportRequestSchema>
+    const { sessionId, messages } = body
+
+    if (!Array.isArray(messages)) {
+      reply.status(400)
+      return { error: 'messages must be an array', code: 'VALIDATION_ERROR' }
+    }
+
+    const agent = sessionManager.getAgent(sessionId)
+    if (!agent) {
+      reply.status(404)
+      return { error: 'Session not found', code: 'SESSION_NOT_FOUND' }
+    }
+
+    if (agent.state.isStreaming) {
+      reply.status(409)
+      return { error: 'Cannot import while agent is streaming', code: 'AGENT_BUSY' }
+    }
+
+    // Replace agent with a new one that has the imported messages
+    const newAgent = createAgent()
+    newAgent.setMessages(messages as any)
+    sessionManager.create(sessionId, newAgent)
+
+    return { success: true, sessionId, messageCount: messages.length }
   })
 
   // 服务关闭时释放资源
